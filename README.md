@@ -146,8 +146,8 @@ UserPromptSubmit hook ◄── local retrieval   (project skill + detailed skil
   data, record, document, log, test, command output, or code and the next
   validation step. The guard only reads explicit `response_guard` frontmatter,
   never prose examples or code identifiers. The default guard mode is
-  `adaptive`: repeated violations are throttled with a growing cooldown and
-  logged without blocking every turn.
+  `strict`: every violation is continued for correction. Set
+  `CHAT2SKILL_RESPONSE_GUARD=false` to disable the guard.
 - **Cost.** A typical extraction makes ~4 LLM calls on your key
   (detect, analyze, generate, judge); replay validation against your
   history adds up to 5 more. Conversations are windowed (last ~40
@@ -413,7 +413,7 @@ dev server; Vite proxies `/api` requests to the Python backend.
 | `CHAT2SKILL_LLM_PROVIDER` | `llm.provider` | inferred | Chat provider. Supported values are `openai` and `anthropic`. |
 | `CHAT2SKILL_MODEL` | `llm.model` | `gpt-4.1` | Model used for detect/analyze/generate/judge calls. |
 | `CHAT2SKILL_USER_ID` | `user_id` | system username | Base namespace for local skills and profile data. Project-specific skills use `<user>__project__<slug>`. |
-| `CHAT2SKILL_RESPONSE_GUARD` | unset | `adaptive` | Stop response guard mode. Use `adaptive`, `block-once`, `strict`, `warn-only`, or `off`. Structured `response_guard.mode: evidence_based_terms` allows explicit evidence-gap disclosure while still blocking unsupported hedging. |
+| `CHAT2SKILL_RESPONSE_GUARD` | unset | `strict` | Stop response guard mode. `true` enables strict blocking; `false` disables it. Advanced modes are `adaptive`, `block-once`, `warn-only`, and `off`. Structured `response_guard.mode: evidence_based_terms` allows explicit evidence-gap disclosure while still blocking unsupported hedging. |
 
 ### Agent notes: Claude Code
 
@@ -431,9 +431,8 @@ setup needed.
 ### Agent notes: Codex
 
 Codex installs hooks from the root `hooks/hooks.json` entrypoint. The
-host-specific copy is also kept at `hooks/codex-hooks.json`. Codex installs do
-not register the blocking Stop response guard because Codex cannot safely
-replay its generated hook prompt. The hook
+host-specific copy is also kept at `hooks/codex-hooks.json`. Codex installs
+register the configurable blocking Stop response guard. The hook
 entrypoints initialize the local data home on first hook run:
 
 - macOS/Linux: `~/.chat2skill/`
@@ -528,24 +527,29 @@ Chat2Skill needs two capabilities for the full automatic loop:
   that can inject or load the output of `scripts/retrieve_for_prompt.py`.
 - **Enforce hard wording rules:** a stop/session-end hook with access to
   the final assistant message that can run `scripts/hook_stop_response_guard.py`.
-  The default `adaptive` mode prevents repeated Stop-hook rewrite loops, and
-  evidence-based rules distinguish verified conclusions from missing-evidence
-  disclosures.
+  The default `strict` mode continues every violation for correction;
+  `CHAT2SKILL_RESPONSE_GUARD=false` disables it. Evidence-based rules
+  distinguish verified conclusions from missing-evidence disclosures.
+
+The repository currently ships native final-response guard registration for
+Claude Code, Codex, and Cursor. The other adapters below are partial: a rule,
+retrieval plugin, or manual CLI path does not provide final-response
+interception by itself.
 
 | Agent | Current support | Notes |
 | --- | --- | --- |
 | Claude Code | Native plugin marketplace | Full automatic support through `.claude-plugin/marketplace.json`, root `hooks/hooks.json`, `hooks/claude-hooks.json`, the `chat2skill` skill, `UserPromptSubmit`, Stop learning, and Stop response guard. |
-| Codex | Native plugin/local installer | Automatic retrieval and Stop learning through `.codex-plugin/plugin.json`, root `hooks/hooks.json`, `hooks/codex-hooks.json`, and local cache refresh through `install.sh`. The blocking Stop response guard is intentionally disabled on Codex. |
+| Codex | Native plugin/local installer | Automatic retrieval, Stop learning, and configurable Stop response guarding through `.codex-plugin/plugin.json`, root `hooks/hooks.json`, `hooks/codex-hooks.json`, and local cache refresh through `install.sh`. |
 | Cursor | Native plugin + project rule | Supported through `.cursor-plugin/plugin.json`, `.cursor-plugin/hooks.json`, `.cursor/rules/chat2skill.mdc`, and the `chat2skill` skill. Stop learning works from Cursor transcripts, and the response guard runs when Cursor provides final response text. Dynamic per-prompt context injection is limited by Cursor's current `beforeSubmitPrompt` hook behavior. |
-| OpenCode | Server plugin + command | `opencode.json` loads `.opencode/plugins/chat2skill.mjs`, which calls `retrieve_for_prompt.py` and appends relevant snippets to the system prompt. `.opencode/command/chat2skill.md` adds a manual command prompt. |
-| GitHub Copilot | Repository instructions | `.github/copilot-instructions.md` tells Copilot how to run Chat2Skill CLI retrieval/update. Local Copilot CLI hooks can also call Chat2Skill; cloud/ephemeral agents are not equivalent to local persistent hooks. |
-| Kimi Code CLI | Skills/hooks capable | Configure `UserPromptSubmit`/`Stop` equivalents to call the hook scripts, or use the skill/CLI workflow. |
-| Windsurf / Cascade | Project rule + hooks capable | `.windsurf/rules/chat2skill.md` provides the project rule. Configure workspace/user hooks to call the hook scripts when available. |
-| Kiro | Steering rule + hooks/export capable | `.kiro/steering/chat2skill.md` provides the steering rule. Use hooks where available, or export/process transcripts manually with `update_from_transcript.py`. |
-| Cline | Project rule | `.clinerules/chat2skill.md` provides the project rule. Use the CLI scripts for retrieval/update. |
+| OpenCode | Server plugin + command | `opencode.json` loads `.opencode/plugins/chat2skill.mjs`, which calls `retrieve_for_prompt.py` and appends relevant snippets to the system prompt. No final-response guard is registered. |
+| GitHub Copilot | Repository instructions | `.github/copilot-instructions.md` provides the CLI workflow. No final-response guard is registered. |
+| Kimi Code CLI | Skills/manual hooks | The project ships no native Kimi hook manifest. Manual hook configuration can call the shared scripts. |
+| Windsurf / Cascade | Project rule | `.windsurf/rules/chat2skill.md` provides instructions only. No final-response guard is registered. |
+| Kiro | Steering rule | `.kiro/steering/chat2skill.md` provides instructions only. No final-response guard is registered. |
+| Cline | Project rule | `.clinerules/chat2skill.md` provides instructions only. No final-response guard is registered. |
 | Aider / generic agents | `AGENTS.md` | `AGENTS.md` gives portable instructions for agents that read repository guidance. |
-| Gemini CLI | Extension/hooks capable | Use the generic hook commands or CLI scripts. A dedicated Gemini extension manifest is not included yet. |
-| Google Antigravity | Plugin/hooks capable | Use the generic hook commands or CLI scripts. A dedicated Antigravity plugin manifest is not included yet. |
+| Gemini CLI | Manual integration | A dedicated extension manifest and final-response guard registration are not included. |
+| Google Antigravity | Manual integration | A dedicated plugin manifest and final-response guard registration are not included. |
 | Continue | Manual/partial | Rules, prompts, and MCP are useful, but no verified lifecycle hook path for the full Chat2Skill loop is included. |
 | Roo Code | Manual/legacy | Use the CLI scripts only unless your local fork exposes compatible hooks. |
 

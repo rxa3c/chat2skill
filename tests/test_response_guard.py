@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import tempfile
 import unittest
@@ -12,10 +13,11 @@ sys.path.insert(0, str(ROOT / "scripts"))
 
 from chat2skill.response_guard import (
     apply_response_guard_mode,
-    blocking_stop_hook_supported,
+    assistant_message_from_input,
     evaluate_message,
     find_banned_terms,
     reset_guard_state,
+    response_guard_mode,
     stop_hook_output,
 )
 
@@ -55,28 +57,23 @@ EVIDENCE_BASED_SOURCE = (
 
 
 class ResponseGuardTests(unittest.TestCase):
-    def test_blocking_stop_hook_is_disabled_for_codex(self):
-        self.assertFalse(
-            blocking_stop_hook_supported({"CODEX_PLUGIN_ROOT": "/tmp/chat2skill"})
-        )
-        self.assertFalse(
-            blocking_stop_hook_supported(
-                {
-                    "CLAUDE_PLUGIN_ROOT": (
-                        "/Users/test/.codex/plugins/cache/chat2skill/chat2skill/0.1.3"
-                    )
-                }
-            )
-        )
-        self.assertFalse(
-            blocking_stop_hook_supported(
-                {"CLAUDE_PLUGIN_ROOT": "/tmp/chat2skill"},
-                Path("/Users/test/.codex/plugins/cache/chat2skill/hook.py"),
-            )
-        )
-        self.assertTrue(
-            blocking_stop_hook_supported({"CLAUDE_PLUGIN_ROOT": "/tmp/chat2skill"})
-        )
+    def test_response_guard_defaults_to_strict_and_can_be_disabled(self):
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(response_guard_mode(), "strict")
+        with patch.dict(os.environ, {"CHAT2SKILL_RESPONSE_GUARD": "false"}):
+            self.assertEqual(response_guard_mode(), "off")
+
+    def test_extracts_final_response_from_supported_hook_payloads(self):
+        payloads = {
+            "Claude/Codex": {"last_assistant_message": "alpha"},
+            "Cursor/Windsurf": {"tool_info": {"response": "alpha"}},
+            "Kiro": {"assistant_response": "alpha"},
+            "Gemini CLI": {"prompt_response": "alpha"},
+        }
+
+        for host, payload in payloads.items():
+            with self.subTest(host=host):
+                self.assertEqual(assistant_message_from_input(payload), "alpha")
 
     def test_blocks_terms_from_structured_guard_frontmatter(self):
         result = evaluate_message(

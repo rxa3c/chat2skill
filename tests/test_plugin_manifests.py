@@ -41,7 +41,7 @@ class PluginManifestTests(unittest.TestCase):
         ]
         self.assertTrue(all("${CODEX_PLUGIN_ROOT}" in command for command in commands))
         self.assertTrue(all("scripts/chat2skill_hook.py" in command for command in commands))
-        self.assertFalse(any("stop-response-guard" in command for command in commands))
+        self.assertTrue(any("stop-response-guard" in command for command in commands))
 
     def test_agent_plugin_hook_files_exist(self):
         for path in (
@@ -112,6 +112,43 @@ class PluginManifestTests(unittest.TestCase):
         self.assertTrue(all("${CLAUDE_PLUGIN_ROOT}" in command for command in commands))
         self.assertTrue(all("scripts/chat2skill_hook.py" in command for command in commands))
         self.assertTrue(any("stop-response-guard" in command for command in commands))
+
+    def test_every_native_stop_hook_adapter_registers_response_guard(self):
+        hook_commands = {
+            "Claude Code": self._commands_from_grouped_hooks(
+                ROOT / ".claude-plugin" / "hooks.json"
+            ),
+            "Codex": self._commands_from_grouped_hooks(
+                ROOT / ".codex-plugin" / "hooks.json"
+            ),
+            "Cursor": self._commands_from_cursor_hooks(
+                ROOT / ".cursor-plugin" / "hooks.json"
+            ),
+        }
+
+        for host, commands in hook_commands.items():
+            with self.subTest(host=host):
+                self.assertTrue(
+                    any(
+                        "stop-response-guard" in command
+                        or "hook_stop_response_guard.py" in command
+                        for command in commands
+                    )
+                )
+
+    @staticmethod
+    def _commands_from_grouped_hooks(path):
+        hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+        return [
+            hook["command"]
+            for group in hooks.get("Stop", [])
+            for hook in group["hooks"]
+        ]
+
+    @staticmethod
+    def _commands_from_cursor_hooks(path):
+        hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]
+        return [hook["command"] for hook in hooks.get("stop", [])]
 
 
 if __name__ == "__main__":

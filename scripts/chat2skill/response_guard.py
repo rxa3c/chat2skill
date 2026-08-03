@@ -13,7 +13,7 @@ import os
 import time
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Iterable, List, Mapping, Sequence
+from typing import Iterable, List, Sequence
 import re
 
 from . import storage
@@ -23,7 +23,7 @@ from .runner import PROJECT_SKILL_FILE
 
 FENCED_CODE_RE = re.compile(r"```.*?```", re.DOTALL)
 INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
-DEFAULT_GUARD_MODE = "adaptive"
+DEFAULT_GUARD_MODE = "strict"
 GUARD_MODES = {"adaptive", "block-once", "strict", "warn-only", "off"}
 GUARD_STATE_PATH = storage.DATA_HOME / "response-guard-state.json"
 GUARD_STATE_TTL_SECONDS = 24 * 60 * 60
@@ -176,6 +176,10 @@ def assistant_message_from_input(data: dict) -> str:
             "lastAssistantMessage",
             "assistant_message",
             "assistantMessage",
+            "assistant_response",
+            "assistantResponse",
+            "prompt_response",
+            "promptResponse",
             "response",
             "output",
             "message",
@@ -267,20 +271,6 @@ def stop_hook_output(result: GuardResult) -> str:
         {"decision": "block", "reason": result.reason},
         ensure_ascii=False,
     )
-
-
-def blocking_stop_hook_supported(
-    environment: Mapping[str, str], runtime_path: Path | None = None
-) -> bool:
-    """Return whether the active host can safely replay a blocking Stop hook."""
-    if environment.get("CODEX_PLUGIN_ROOT"):
-        return False
-    candidates = [
-        environment.get("CLAUDE_PLUGIN_ROOT", ""),
-        environment.get("CODEX_HOME", ""),
-        str(runtime_path or ""),
-    ]
-    return not any("/.codex/" in value.replace("\\", "/") for value in candidates)
 
 
 def _guard_state_key(user_id: str, terms: Sequence[str]) -> str:

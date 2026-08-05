@@ -126,7 +126,7 @@ Stop hook ──► response guard ──► continue on violation
      │
      └────► queue ──► worker ─────────────► POST /v1/extract
                           │                 (stateless algorithm,
-   ~/.chat2skill/ ◄───────┘                  your own LLM api key)
+   ~/.chat2skill/ ◄───────┘                  your own LLM credential)
    skills + profile + history     ◄──────── skill + profile + replay
                                             POST /v1/project-skill
 UserPromptSubmit hook ◄── local retrieval   (project skill + detailed skills)
@@ -135,10 +135,10 @@ UserPromptSubmit hook ◄── local retrieval   (project skill + detailed skil
 - **Your data stays local.** Skills, profile, and history live in
   `~/.chat2skill/` (SQLite + markdown files). The cloud runs the
   extraction algorithm statelessly and stores nothing.
-- **Bring your own key.** Extraction LLM calls use *your* api key
-  (OpenAI-compatible, e.g. OpenAI/DeepSeek). The key is sent with each
-  request, used in memory, never persisted or logged server-side.
-  Without a key, the server falls back to lower-quality heuristics.
+- **Bring your own credential.** Extraction LLM calls support an API key or a
+  short-lived OAuth bearer token. The credential is sent with each request,
+  used in memory, never persisted or logged server-side. Without a usable
+  credential, the server falls back to lower-quality heuristics.
 - **Response guard.** When a project skill contains a high-confidence
   deterministic wording constraint, the Stop hook checks the final assistant
   message locally. The learned rule is evidence-based: verified facts must use
@@ -227,7 +227,7 @@ From a source checkout, manual setup is equivalent:
 ```bash
 mkdir -p ~/.chat2skill
 cp config.example.json ~/.chat2skill/config.json
-# edit ~/.chat2skill/config.json: set api_url and llm.api_key
+# edit ~/.chat2skill/config.json: set api_url and an llm credential
 ```
 
 Without a source checkout, create the same config file yourself using one of
@@ -316,6 +316,27 @@ compatibility layer:
 
 The server also infers `anthropic` from an `api.anthropic.com` base URL for
 older configs that do not yet contain `llm.provider`.
+
+For an OAuth-enabled LLM, keep the access token outside `config.json` and let
+Chat2Skill read it at hook time:
+
+```json
+{
+  "llm": {
+    "auth_type": "oauth",
+    "access_token_env": "CHAT2SKILL_LLM_ACCESS_TOKEN",
+    "provider": "anthropic",
+    "base_url": "https://api.anthropic.com/v1/",
+    "model": "claude-sonnet-5"
+  }
+}
+```
+
+Set `CHAT2SKILL_LLM_ACCESS_TOKEN` in the host environment, or point
+`llm.access_token_file` at a host-managed JSON credentials file and set
+`llm.access_token_field` (default: `access_token`). The file is read for each
+hook invocation so a host-managed token refresh is picked up. Chat2Skill does
+not implement a provider-specific browser login or store refresh tokens.
 
 For a remote OpenAI-compatible embedding endpoint, replace the `embedding`
 block with:
@@ -408,8 +429,12 @@ dev server; Vite proxies `/api` requests to the Python backend.
 | `CHAT2SKILL_MEMORY_TOKEN_BUDGET` | `memory.token_budget` | `4000` | Total prompt-injection token budget for memory plus skills. |
 | `CHAT2SKILL_MEMORY_MEMORY_RATIO` | `memory.memory_ratio` | `0.6` | Fraction of retrieval budget initially allocated to memory. |
 | `CHAT2SKILL_MEMORY_SKILL_TOP_K` | `memory.skill_top_k` | `6` | Maximum detailed skills injected by local prompt retrieval. |
-| `OPENAI_API_KEY` | `llm.api_key` | unset | Your OpenAI-compatible LLM API key. If unset, extraction falls back to lower-quality heuristics. |
+| `OPENAI_API_KEY` | `llm.api_key` | unset | Your OpenAI-compatible LLM API key. |
 | `OPENAI_BASE_URL` | `llm.base_url` | `null` | Optional OpenAI-compatible base URL. Use `null` for OpenAI; use `https://api.deepseek.com` for DeepSeek. |
+| `CHAT2SKILL_LLM_AUTH_TYPE` | `llm.auth_type` | `api_key` | Set to `oauth` to send an OAuth bearer token instead of an API key. |
+| `CHAT2SKILL_LLM_ACCESS_TOKEN` | `llm.access_token` | unset | OAuth bearer token. Prefer this environment variable over storing a token in JSON. |
+| `CHAT2SKILL_LLM_ACCESS_TOKEN_FILE` | `llm.access_token_file` | unset | Host-managed JSON or text file containing the current OAuth access token. |
+| `CHAT2SKILL_LLM_ACCESS_TOKEN_FIELD` | `llm.access_token_field` | `access_token` | Dot-separated JSON field used when reading `CHAT2SKILL_LLM_ACCESS_TOKEN_FILE`. |
 | `CHAT2SKILL_LLM_PROVIDER` | `llm.provider` | inferred | Chat provider. Supported values are `openai` and `anthropic`. |
 | `CHAT2SKILL_MODEL` | `llm.model` | `gpt-4.1` | Model used for detect/analyze/generate/judge calls. |
 | `CHAT2SKILL_USER_ID` | `user_id` | system username | Base namespace for local skills and profile data. Project-specific skills use `<user>__project__<slug>`. |
@@ -561,7 +586,7 @@ adapter map.
 - Python 3.10+ (standard library only — no pip installs)
 - Node.js + npm for optional local embeddings through `Snowflake/snowflake-arctic-embed-xs`
 - A Chat2Skill API endpoint (`api_url` in config)
-- Optional: an OpenAI-compatible LLM api key for high-quality extraction
+- Optional: an API key or OAuth bearer token for high-quality extraction
 
 ## Data layout
 
@@ -582,7 +607,7 @@ you learn in one repo doesn't leak into another.
 - Stop-hook transcripts are sent to the Chat2Skill API for stateless
   analysis, processed in memory, and not persisted server-side. Server logs
   contain metadata only (session id, error type) — never message content or
-  api keys.
+  API keys or OAuth access tokens.
 - Prompt retrieval does not call the cloud API. It loads top-K project
   memory and skills from local `~/.chat2skill/c2s.db`, applies the configured
   budget, and injects the compact result into the prompt.

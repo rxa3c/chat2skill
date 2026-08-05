@@ -1,8 +1,10 @@
 """User-level configuration.
 
 Everything lives under the data home (default ~/.chat2skill, overridable
-with CHAT2SKILL_HOME). The LLM api key belongs to the user (BYOK); it is
+with CHAT2SKILL_HOME). The LLM credential belongs to the user (BYOK); it is
 sent to the Chat2Skill cloud only to run this user's own extraction calls.
+OAuth access tokens follow the same short-lived, request-scoped path and are
+resolved locally from an environment variable or credentials file.
 """
 
 from __future__ import annotations
@@ -68,6 +70,12 @@ def load_config() -> dict:
         llm["base_url"] = os.environ["OPENAI_BASE_URL"]
     if os.environ.get("CHAT2SKILL_LLM_PROVIDER"):
         llm["provider"] = os.environ["CHAT2SKILL_LLM_PROVIDER"]
+    if os.environ.get("CHAT2SKILL_LLM_AUTH_TYPE"):
+        llm["auth_type"] = os.environ["CHAT2SKILL_LLM_AUTH_TYPE"]
+    if os.environ.get("CHAT2SKILL_LLM_ACCESS_TOKEN_FILE"):
+        llm["access_token_file"] = os.environ["CHAT2SKILL_LLM_ACCESS_TOKEN_FILE"]
+    if os.environ.get("CHAT2SKILL_LLM_ACCESS_TOKEN_FIELD"):
+        llm["access_token_field"] = os.environ["CHAT2SKILL_LLM_ACCESS_TOKEN_FIELD"]
     if os.environ.get("CHAT2SKILL_MODEL"):
         llm["model"] = os.environ["CHAT2SKILL_MODEL"]
     llm.setdefault("model", "gpt-4.1")
@@ -106,21 +114,82 @@ def load_config() -> dict:
 def llm_payload(config: dict) -> Optional[dict]:
     """LLM block for API requests, or None to use server-side heuristics."""
     llm = config.get("llm") or {}
-    if not llm.get("api_key"):
-        return None
+    auth_type = _llm_auth_type(llm)
     payload = {
-        "api_key": llm["api_key"],
+        "auth_type": auth_type,
         "provider": llm.get("provider"),
         "base_url": llm.get("base_url"),
         "model": llm.get("model", "gpt-4.1"),
         "embedding_model": llm.get("embedding_model"),
     }
+    if auth_type == "oauth":
+        access_token = _oauth_access_token(llm)
+        if not access_token:
+            return None
+        payload["access_token"] = access_token
+    else:
+        if not llm.get("api_key"):
+            return None
+        payload["api_key"] = llm["api_key"]
     embedding = embedding_payload(config)
     if embedding:
         payload["embedding_api_key"] = embedding["api_key"]
         payload["embedding_base_url"] = embedding.get("base_url")
         payload["embedding_model"] = embedding.get("model")
     return payload
+
+
+def _llm_auth_type(llm: dict) -> str:
+    raw = str(llm.get("auth_type") or llm.get("auth_mode") or "").strip().lower()
+    if raw in {"oauth", "oauth2", "bearer"}:
+        return "oauth"
+    if raw in {"api_key", "api-key", "apikey", "key"}:
+        return "api_key"
+    token_env = str(llm.get("access_token_env") or "CHAT2SKILL_LLM_ACCESS_TOKEN").strip()
+    has_env_token = bool(
+        os.environ.get(token_env) or os.environ.get("CHAT2SKILL_LLM_OAUTH_TOKEN")
+    )
+    return (
+        "oauth"
+        if llm.get("access_token") or llm.get("access_token_file") or has_env_token
+        else "api_key"
+    )
+
+
+def _oauth_access_token(llm: dict) -> str:
+    token = str(llm.get("access_token") or "").strip()
+    if token:
+        return token
+
+    token_env = str(llm.get("access_token_env") or "CHAT2SKILL_LLM_ACCESS_TOKEN").strip()
+    token = os.environ.get(token_env, "").strip()
+    if not token and token_env != "CHAT2SKILL_LLM_OAUTH_TOKEN":
+        token = os.environ.get("CHAT2SKILL_LLM_OAUTH_TOKEN", "").strip()
+    if token:
+        return token
+
+    path = str(llm.get("access_token_file") or "").strip()
+    if not path:
+        return ""
+    return _read_oauth_token_file(path, str(llm.get("access_token_field") or "access_token"))
+
+
+def _read_oauth_token_file(path: str, field: str) -> str:
+    try:
+        raw = Path(path).expanduser().read_text(encoding="utf-8").strip()
+    except OSError:
+        return ""
+    if not raw:
+        return ""
+    try:
+        value: object = json.loads(raw)
+    except json.JSONDecodeError:
+        return raw
+    for key in (part.strip() for part in field.split(".") if part.strip()):
+        if not isinstance(value, dict):
+            return ""
+        value = value.get(key)
+    return value.strip() if isinstance(value, str) else ""
 
 
 def embedding_payload(config: dict) -> Optional[dict]:

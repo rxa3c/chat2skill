@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import os
 import sqlite3
 import sys
 import tempfile
@@ -123,6 +124,43 @@ class MemoryClientTests(unittest.TestCase):
         self.assertEqual(payload["embedding_api_key"], "embed-key-123")
         self.assertEqual(payload["embedding_base_url"], "http://127.0.0.1:5831/v1")
         self.assertEqual(payload["embedding_model"], "local-embed")
+
+    def test_llm_payload_supports_oauth_access_token_from_environment(self):
+        with patch.dict(os.environ, {"CHAT2SKILL_LLM_ACCESS_TOKEN": "oauth-token-123"}, clear=True):
+            payload = memory_client.llm_payload(
+                {
+                    "llm": {
+                        "auth_type": "oauth",
+                        "provider": "anthropic",
+                        "base_url": "https://api.anthropic.com/v1/",
+                        "model": "claude-sonnet-5",
+                    }
+                }
+            )
+
+        self.assertEqual(payload["auth_type"], "oauth")
+        self.assertEqual(payload["access_token"], "oauth-token-123")
+        self.assertNotIn("api_key", payload)
+
+    def test_llm_payload_reads_oauth_access_token_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            token_path = Path(tmp) / "credentials.json"
+            token_path.write_text(
+                json.dumps({"credentials": {"access_token": "oauth-token-456"}}),
+                encoding="utf-8",
+            )
+            with patch.dict(os.environ, {}, clear=True):
+                payload = memory_client.llm_payload(
+                    {
+                        "llm": {
+                            "auth_type": "oauth",
+                            "access_token_file": str(token_path),
+                            "access_token_field": "credentials.access_token",
+                        }
+                    }
+                )
+
+        self.assertEqual(payload["access_token"], "oauth-token-456")
 
     def test_local_transformers_embedding_stays_local(self):
         payload = memory_client.llm_payload(

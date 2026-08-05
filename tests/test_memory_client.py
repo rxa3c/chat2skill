@@ -142,6 +142,22 @@ class MemoryClientTests(unittest.TestCase):
         self.assertEqual(payload["access_token"], "oauth-token-123")
         self.assertNotIn("api_key", payload)
 
+    def test_llm_payload_prefers_inline_oauth_access_token(self):
+        with patch.dict(os.environ, {"CHAT2SKILL_LLM_ACCESS_TOKEN": "env-token"}, clear=True):
+            payload = memory_client.llm_payload(
+                {
+                    "llm": {
+                        "auth_type": "api_key",
+                        "api_key": "api-key-123",
+                        "access_token": "  inline-token-456  ",
+                    }
+                }
+            )
+
+        self.assertEqual(payload["auth_type"], "oauth")
+        self.assertEqual(payload["access_token"], "inline-token-456")
+        self.assertNotIn("api_key", payload)
+
     def test_llm_payload_reads_oauth_access_token_file(self):
         with tempfile.TemporaryDirectory() as tmp:
             token_path = Path(tmp) / "credentials.json"

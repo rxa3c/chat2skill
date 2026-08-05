@@ -61,6 +61,7 @@ def _default_config() -> dict:
         "llm": {
             "api_key": "",
             "auth_type": "api_key",
+            "access_token": "",
             "access_token_env": "CHAT2SKILL_LLM_ACCESS_TOKEN",
             "provider": "openai",
             "base_url": None,

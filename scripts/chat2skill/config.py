@@ -4,7 +4,8 @@ Everything lives under the data home (default ~/.chat2skill, overridable
 with CHAT2SKILL_HOME). The LLM credential belongs to the user (BYOK); it is
 sent to the Chat2Skill cloud only to run this user's own extraction calls.
 Pre-issued OAuth access tokens follow the same short-lived, request-scoped path
-and are resolved locally from an environment variable or credentials file.
+and are resolved locally from inline config first, then an environment variable
+or credentials file.
 """
 
 from __future__ import annotations
@@ -142,6 +143,10 @@ def llm_payload(config: dict) -> Optional[dict]:
 def _llm_auth_type(llm: dict) -> str:
     raw = str(llm.get("auth_type") or llm.get("auth_mode") or "").strip().lower()
     if raw in {"oauth", "oauth2", "bearer"}:
+        return "oauth"
+    # An inline token is an explicit credential choice, even in configs created
+    # from the older api_key template.
+    if str(llm.get("access_token") or "").strip():
         return "oauth"
     if raw in {"api_key", "api-key", "apikey", "key"}:
         return "api_key"

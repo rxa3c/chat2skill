@@ -1,6 +1,7 @@
-import tempfile
+import json
 import os
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -33,6 +34,8 @@ class InitializerTests(unittest.TestCase):
             self.assertTrue(skill_dir.exists())
             self.assertTrue((data_home / "contexts").exists())
             self.assertTrue(result["created_config"])
+            generated_config = json.loads((data_home / "config.json").read_text(encoding="utf-8"))
+            self.assertIn("access_token", generated_config["llm"])
 
     def test_hook_launcher_initializes_user_home_before_dispatch(self):
         with tempfile.TemporaryDirectory() as tmp:

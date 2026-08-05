@@ -341,6 +341,40 @@ hook invocation so a host-managed token refresh is picked up. The
 OAuth login. Chat2Skill does not yet implement provider-specific browser login
 or store refresh tokens.
 
+Claude Code's correct OAuth command is `claude setup-token`. It walks through
+OAuth authorization and prints a one-year `CLAUDE_CODE_OAUTH_TOKEN`; it does
+not save the token. However, Chat2Skill's default architecture sends
+`llm.access_token` to the remote `api_url`, so a Claude subscription token must
+not be pasted into this config for remote extraction. Anthropic documents these
+tokens for Claude Code and native Anthropic applications, and prohibits
+third-party services from routing Claude subscription credentials on behalf of
+users. Use an Anthropic Console API key or an approved workload identity for
+remote Chat2Skill extraction. A local Claude Code/Agent SDK adapter is required
+to keep the subscription token on the host.
+
+See the [Claude Code authentication guide](https://code.claude.com/docs/en/authentication)
+for `claude setup-token` and the [credential-use policy](https://code.claude.com/docs/en/legal-and-compliance).
+
+For OpenAI/Codex, the provider login is:
+
+```bash
+# Browser OAuth flow.
+codex login
+
+# Headless/device-code OAuth flow.
+codex login --device-auth
+
+# Verify the active mode.
+codex login status
+```
+
+Codex stores and refreshes its ChatGPT credentials locally in
+`~/.codex/auth.json`. Do not copy that file or its token into Chat2Skill's
+remote `llm.access_token` field. ChatGPT-managed Codex OAuth is for Codex
+account usage, while the OpenAI Platform API path used by the remote extractor
+uses an OpenAI API key. A local Codex adapter is required to use the former
+without forwarding the credential to `api.chat2skill.com`.
+
 For a remote OpenAI-compatible embedding endpoint, replace the `embedding`
 block with:
 

@@ -136,9 +136,10 @@ UserPromptSubmit hook ◄── local retrieval   (project skill + detailed skil
   `~/.chat2skill/` (SQLite + markdown files). The cloud runs the
   extraction algorithm statelessly and stores nothing.
 - **Bring your own credential.** Extraction LLM calls support an API key or a
-  short-lived OAuth bearer token. The credential is sent with each request,
-  used in memory, never persisted or logged server-side. Without a usable
-  credential, the server falls back to lower-quality heuristics.
+  short-lived OAuth bearer token acquired by the host. The credential is sent
+  with each request, used in memory, never persisted or logged server-side.
+  Without a usable credential, the server falls back to lower-quality
+  heuristics.
 - **Response guard.** When a project skill contains a high-confidence
   deterministic wording constraint, the Stop hook checks the final assistant
   message locally. The learned rule is evidence-based: verified facts must use
@@ -317,8 +318,8 @@ compatibility layer:
 The server also infers `anthropic` from an `api.anthropic.com` base URL for
 older configs that do not yet contain `llm.provider`.
 
-For an OAuth-enabled LLM, keep the access token outside `config.json` and let
-Chat2Skill read it at hook time:
+For a host-managed OAuth bearer token, keep the access token outside
+`config.json` and let Chat2Skill read it at hook time:
 
 ```json
 {
@@ -335,8 +336,10 @@ Chat2Skill read it at hook time:
 Set `CHAT2SKILL_LLM_ACCESS_TOKEN` in the host environment, or point
 `llm.access_token_file` at a host-managed JSON credentials file and set
 `llm.access_token_field` (default: `access_token`). The file is read for each
-hook invocation so a host-managed token refresh is picked up. Chat2Skill does
-not implement a provider-specific browser login or store refresh tokens.
+hook invocation so a host-managed token refresh is picked up. The
+`access_token_env` field only names the source variable; it does not perform
+OAuth login. Chat2Skill does not yet implement provider-specific browser login
+or store refresh tokens.
 
 For a remote OpenAI-compatible embedding endpoint, replace the `embedding`
 block with:
@@ -432,7 +435,7 @@ dev server; Vite proxies `/api` requests to the Python backend.
 | `OPENAI_API_KEY` | `llm.api_key` | unset | Your OpenAI-compatible LLM API key. |
 | `OPENAI_BASE_URL` | `llm.base_url` | `null` | Optional OpenAI-compatible base URL. Use `null` for OpenAI; use `https://api.deepseek.com` for DeepSeek. |
 | `CHAT2SKILL_LLM_AUTH_TYPE` | `llm.auth_type` | `api_key` | Set to `oauth` to send an OAuth bearer token instead of an API key. |
-| `CHAT2SKILL_LLM_ACCESS_TOKEN` | `llm.access_token` | unset | OAuth bearer token. Prefer this environment variable over storing a token in JSON. |
+| `CHAT2SKILL_LLM_ACCESS_TOKEN` | `llm.access_token` | unset | Pre-issued OAuth bearer token. Prefer this environment variable over storing a token in JSON. |
 | `CHAT2SKILL_LLM_ACCESS_TOKEN_FILE` | `llm.access_token_file` | unset | Host-managed JSON or text file containing the current OAuth access token. |
 | `CHAT2SKILL_LLM_ACCESS_TOKEN_FIELD` | `llm.access_token_field` | `access_token` | Dot-separated JSON field used when reading `CHAT2SKILL_LLM_ACCESS_TOKEN_FILE`. |
 | `CHAT2SKILL_LLM_PROVIDER` | `llm.provider` | inferred | Chat provider. Supported values are `openai` and `anthropic`. |

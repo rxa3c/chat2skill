@@ -3,8 +3,8 @@
 Everything lives under the data home (default ~/.chat2skill, overridable
 with CHAT2SKILL_HOME). The LLM credential belongs to the user (BYOK); it is
 sent to the Chat2Skill cloud only to run this user's own extraction calls.
-OAuth access tokens follow the same short-lived, request-scoped path and are
-resolved locally from an environment variable or credentials file.
+Pre-issued OAuth access tokens follow the same short-lived, request-scoped path
+and are resolved locally from an environment variable or credentials file.
 """
 
 from __future__ import annotations

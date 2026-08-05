@@ -13,7 +13,7 @@ def main() -> int:
     print(f"Database: {result['db_path']}")
     print(f"Skills: {result['skill_dir']}")
     if result["created_config"]:
-        print("Created config.json. Edit it to set your LLM API key or OAuth token source.")
+        print("Created config.json. Edit it to set your LLM API key or pre-issued OAuth token source.")
     else:
         print("Config already exists.")
     return 0

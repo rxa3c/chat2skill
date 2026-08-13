@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 
 from chat2skill.config import load_config
 from chat2skill.initializer import ensure_user_home
+from chat2skill.integration import retrieve_prompt_context
 from chat2skill.memory_client import MemoryClientError, materialize_for_prompt
 from chat2skill.hookio import (
     json_hook_output,
@@ -19,9 +20,7 @@ from chat2skill.hookio import (
     prompt_from_input,
     read_hook_input,
 )
-from chat2skill.context_store import context_key
 from chat2skill.response_guard import reset_guard_state
-from chat2skill.storage import record_skill_usage, save_project_memory_materialization
 
 
 def main() -> int:
@@ -48,7 +47,13 @@ def inject_memory_context(
     prompt: str,
 ) -> int:
     try:
-        result = materialize_for_prompt(config, project_dir, prompt, scoped_user_id)
+        context, result = retrieve_prompt_context(
+            config,
+            project_dir,
+            scoped_user_id,
+            prompt,
+            materializer=materialize_for_prompt,
+        )
     except MemoryClientError as exc:
         log_event(
             "UserPromptSubmit.memory_failed",
@@ -58,8 +63,7 @@ def inject_memory_context(
         )
         return 0
 
-    rendered = str(result.get("rendered_text") or "").strip()
-    if not rendered:
+    if not context:
         log_event(
             "UserPromptSubmit.done",
             project_dir=project_dir,
@@ -69,27 +73,7 @@ def inject_memory_context(
         )
         return 0
 
-    context = (
-        "## Chat2Skill Memory and Skills\n"
-        "Apply this retrieved project memory, recall summary, and relevant skills when they match the current task:\n\n"
-        f"{rendered}\n\n"
-        f"Materialization ID: {result.get('materialization_id')}"
-    )
     included_skills = (result.get("skills") or {}).get("skills_included") or []
-    if included_skills:
-        record_skill_usage(scoped_user_id, included_skills)
-    save_project_memory_materialization(
-        scoped_user_id,
-        context_key(project_dir),
-        {
-            "materialization_id": result.get("materialization_id"),
-            "memories_included": (result.get("memory") or {}).get("memories_included") or [],
-            "skills_included": included_skills,
-            "query": prompt,
-            "rendered_prompt": context,
-            "token_count": result.get("token_count"),
-        },
-    )
     json_hook_output(context)
     log_event(
         "UserPromptSubmit.done",

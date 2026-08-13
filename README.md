@@ -549,6 +549,23 @@ adds relevant snippets to the system prompt.
 { "plugin": ["./.opencode/plugins/chat2skill.mjs"] }
 ```
 
+### Agent notes: DeepSeek Harness
+
+The repository root is also a DeepSeek Harness bundle. Add it to the profile
+you run:
+
+```bash
+dsh plugin --profile headless add /Users/sac/Desktop/Dev/Chat2Skill
+dsh --profile headless
+```
+
+The adapter uses Harness `agent/pre-step` for retrieval and
+`agent/turn-stopping` for the shared response guard and learning. It invokes
+the existing local Python runtime, so the algorithm project and its API do not
+need a change for this integration. See
+[`adapters/deepseek-harness/README.md`](adapters/deepseek-harness/README.md)
+for environment overrides.
+
 ### Agent notes: Other agents
 
 For manual integrations from a source checkout, point hook-capable agents at:
@@ -591,7 +608,7 @@ Chat2Skill needs two capabilities for the full automatic loop:
   distinguish verified conclusions from missing-evidence disclosures.
 
 The repository currently ships native final-response guard registration for
-Claude Code, Codex, and Cursor. The other adapters below are partial: a rule,
+Claude Code, Codex, Cursor, and DeepSeek Harness. The other adapters below are partial: a rule,
 retrieval plugin, or manual CLI path does not provide final-response
 interception by itself.
 
@@ -599,6 +616,7 @@ interception by itself.
 | --- | --- | --- |
 | Claude Code | Native plugin marketplace | Full automatic support through `.claude-plugin/marketplace.json`, root `hooks/hooks.json`, `hooks/claude-hooks.json`, the `chat2skill` skill, `UserPromptSubmit`, Stop learning, and Stop response guard. |
 | Codex | Native plugin/local installer | Automatic retrieval, Stop learning, and configurable Stop response guarding through `.codex-plugin/plugin.json`, root `hooks/hooks.json`, `hooks/codex-hooks.json`, and local cache refresh through `install.sh`. |
+| DeepSeek Harness | Native Cordis bundle | Add the Chat2Skill repository root with `dsh plugin --profile <name> add <path>`. The adapter uses `agent/pre-step` for retrieval, `agent/turn-stopping` for the shared guard and learning, and the current Chat2Skill algorithm API without algorithm-project changes. |
 | Cursor | Native plugin + project rule | Supported through `.cursor-plugin/plugin.json`, `.cursor-plugin/hooks.json`, `.cursor/rules/chat2skill.mdc`, and the `chat2skill` skill. Stop learning works from Cursor transcripts, and the response guard runs when Cursor provides final response text. Dynamic per-prompt context injection is limited by Cursor's current `beforeSubmitPrompt` hook behavior. |
 | OpenCode | Server plugin + command | `opencode.json` loads `.opencode/plugins/chat2skill.mjs`, which calls `retrieve_for_prompt.py` and appends relevant snippets to the system prompt. No final-response guard is registered. |
 | GitHub Copilot | Repository instructions | `.github/copilot-instructions.md` provides the CLI workflow. No final-response guard is registered. |

@@ -1,0 +1,10 @@
+# Chat2Skill's DeepSeek Harness bundle layer.
+- insert:
+    - id: chat2skill
+      name: chat2skill-plugin-runtime
+      inject: ['subprocess']
+      config:
+        enabled: !!js process.env.CHAT2SKILL_DSH_ENABLED !== 'false'
+        python: !!js process.env.CHAT2SKILL_PYTHON ?? 'python3'
+        projectDir: !!js process.env.CHAT2SKILL_PROJECT_DIR ?? ''
+        responseGuard: !!js process.env.CHAT2SKILL_RESPONSE_GUARD ?? 'strict'

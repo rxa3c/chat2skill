@@ -136,6 +136,28 @@ class PluginManifestTests(unittest.TestCase):
                     )
                 )
 
+    def test_deepseek_harness_bundle_declares_lifecycle_adapter(self):
+        package = json.loads((ROOT / "package.json").read_text(encoding="utf-8"))
+        patch_path = ROOT / package["dsh"]["bundle"]["patch"]
+        patch = patch_path.read_text(encoding="utf-8")
+        adapter = (ROOT / "adapters" / "deepseek-harness" / "plugin.mjs").read_text(
+            encoding="utf-8"
+        )
+        bridge = (ROOT / "scripts" / "deepseek_harness_adapter.py").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertEqual(package["dsh"]["bundle"]["patch"], "./adapters/deepseek-harness/cordis.patch.yml")
+        self.assertTrue(patch_path.exists())
+        self.assertIn("name: chat2skill-plugin-runtime", patch)
+        self.assertIn("inject: ['subprocess']", patch)
+        self.assertIn("agent/pre-step", adapter)
+        self.assertIn("agent/turn-stopping", adapter)
+        self.assertIn("ctx.subprocess.spawn", adapter)
+        self.assertIn("--mode", bridge)
+        self.assertIn("retrieve_prompt_context", bridge)
+        self.assertIn("runner.run_extraction", bridge)
+
     @staticmethod
     def _commands_from_grouped_hooks(path):
         hooks = json.loads(path.read_text(encoding="utf-8"))["hooks"]

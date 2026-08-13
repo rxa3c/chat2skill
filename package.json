@@ -4,6 +4,15 @@
   "type": "module",
   "version": "0.1.3",
   "description": "Optional local runtime dependencies for Chat2Skill plugin features.",
+  "main": "./adapters/deepseek-harness/plugin.mjs",
+  "exports": {
+    ".": "./adapters/deepseek-harness/plugin.mjs"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./adapters/deepseek-harness/cordis.patch.yml"
+    }
+  },
   "dependencies": {
     "@huggingface/transformers": "^4.2.0"
   }

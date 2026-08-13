@@ -10,6 +10,7 @@ load the same behavior in each coding agent.
 | --- | --- | --- |
 | Claude Code | `.claude-plugin/`, `hooks/hooks.json`, `hooks/claude-hooks.json`, `skills/` | Full plugin marketplace install with the `chat2skill` skill, `UserPromptSubmit`, Stop learning, and Stop response guard hooks. |
 | Codex | `.codex-plugin/plugin.json`, `hooks/hooks.json`, `hooks/codex-hooks.json`, `skills/` | Plugin install with Codex-specific retrieval, Stop learning, and configurable blocking Stop response guard hooks. `install.sh` writes the Codex manifest into each Codex cache. |
+| DeepSeek Harness | `package.json`, `adapters/deepseek-harness/`, `scripts/deepseek_harness_adapter.py` | Cordis bundle adapter. `agent/pre-step` retrieves context; `agent/turn-stopping` runs the shared response guard and session learning through `ctx.subprocess`. |
 | Cursor | `.cursor-plugin/`, `.cursor-plugin/hooks.json`, `.cursor/rules/chat2skill.mdc` | Native plugin plus always-on project rule. `stop` learns from Cursor transcripts and runs the response guard when Cursor provides final response text; prompt-specific retrieval should use the skill or CLI because Cursor's current `beforeSubmitPrompt` hook does not inject dynamic context. |
 | OpenCode | `opencode.json`, `.opencode/plugins/chat2skill.mjs`, `.opencode/command/chat2skill.md` | Server plugin performs retrieval. It does not register a final-response guard. |
 | GitHub Copilot | `.github/copilot-instructions.md` | Repository instructions only; no final-response guard registration. |
@@ -30,9 +31,10 @@ project instructions, keep its copied rule text aligned with `AGENTS.md`.
 - `scripts/hook_user_prompt_submit.py`: prompt/session-start retrieval hook.
 - `scripts/hook_stop.py`: session-end learning hook.
 - `scripts/hook_stop_response_guard.py`: session-end final-message guard for hard wording constraints.
+- `adapters/deepseek-harness/plugin.mjs`: Cordis lifecycle adapter for DeepSeek Harness.
 - `scripts/retrieve_for_prompt.py`: manual or plugin-driven retrieval.
 - `scripts/update_from_transcript.py`: manual transcript processing.
 
-Claude Code, Codex, and Cursor are the native hook adapters that register the
-shared response guard. Its default mode is `strict`; setting
-`CHAT2SKILL_RESPONSE_GUARD=false` disables it consistently for all three.
+Claude Code, Codex, Cursor, and DeepSeek Harness are the native adapters that
+register the shared response guard. Its default mode is `strict`; setting
+`CHAT2SKILL_RESPONSE_GUARD=false` disables it consistently for all four.

@@ -148,15 +148,27 @@ class PluginManifestTests(unittest.TestCase):
         )
 
         self.assertEqual(package["dsh"]["bundle"]["patch"], "./adapters/deepseek-harness/cordis.patch.yml")
+        self.assertEqual(package["exports"]["./client"], "./adapters/deepseek-harness/client.js")
+        self.assertEqual(package["exports"]["./package.json"], "./package.json")
+        self.assertEqual(package["dsh"]["client"]["platform"], "web")
+        self.assertIn("@deepseek-ai/dsh-client-ui-sidebar", package["dsh"]["client"]["inject"])
         self.assertTrue(patch_path.exists())
         self.assertIn("name: chat2skill-plugin-runtime", patch)
         self.assertIn("inject: ['subprocess']", patch)
         self.assertIn("agent/pre-step", adapter)
         self.assertIn("agent/turn-stopping", adapter)
+        self.assertIn("installSettingsSection", adapter)
+        self.assertIn("settingsNamespace('chat2skill')", adapter)
         self.assertIn("ctx.subprocess.spawn", adapter)
         self.assertIn("--mode", bridge)
         self.assertIn("retrieve_prompt_context", bridge)
         self.assertIn("runner.run_extraction", bridge)
+
+        client = (ROOT / "adapters" / "deepseek-harness" / "client.js").read_text(encoding="utf-8")
+        self.assertIn("window.__ModuleLoader__.load", client)
+        self.assertIn("sidebar.footer.action", client)
+        self.assertIn("settingsScope.bind", client)
+        self.assertIn("Pause plugin", client)
 
     @staticmethod
     def _commands_from_grouped_hooks(path):

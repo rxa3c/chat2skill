@@ -8,6 +8,16 @@ lives in the Chat2Skill repository and reuses the existing Python runtime:
   response guard, then learns from the session transcript.
 - `ctx.subprocess` runs the bridge without adding an algorithm-server route.
 
+The package also declares a browser half for the Harness sidebar. It registers
+`sidebar.footer.action`, so Chat2Skill appears above Settings and can be
+expanded from the collapsed rail. Its panel reads the live `chat2skill`
+settings section and lets the user pause or enable the runtime.
+
+This is a live feature pause rather than a Loader `disabled` toggle. Disabling
+the Loader entry would unload the browser half that owns the control, leaving
+no way to enable it again from the sidebar. The entry configuration remains
+the base value, while a user setting can override it and survive a restart.
+
 ## Install
 
 From this checkout, add the repository root as a profile plugin:
@@ -32,6 +42,10 @@ loaded:
   session `cwd` is used.
 - `CHAT2SKILL_RESPONSE_GUARD=off|warn-only|block-once|adaptive|strict`
   controls the shared response guard. The default is `strict`.
+
+The browser toggle writes the `enabled` field in the `chat2skill` settings
+namespace. When that namespace is available, it takes precedence over the
+entry environment config and applies without restarting the Harness.
 
 The DeepSeek Harness adapter changes only this plugin repository. The existing
 algorithm project and its API contract do not need a change for this

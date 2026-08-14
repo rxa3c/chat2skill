@@ -6,14 +6,29 @@
   "description": "Optional local runtime dependencies for Chat2Skill plugin features.",
   "main": "./adapters/deepseek-harness/plugin.mjs",
   "exports": {
-    ".": "./adapters/deepseek-harness/plugin.mjs"
+    ".": "./adapters/deepseek-harness/plugin.mjs",
+    "./client": "./adapters/deepseek-harness/client.js",
+    "./package.json": "./package.json"
   },
   "dsh": {
     "bundle": {
       "patch": "./adapters/deepseek-harness/cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-sidebar",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "platform": "web"
     }
   },
   "dependencies": {
+    "@deepseek-ai/dsh-settings": "^0.1.0-rc.5",
+    "@deepseek-ai/schemastery": "3.18.1",
     "@huggingface/transformers": "^4.2.0"
   }
 }

@@ -1,20 +1,44 @@
 import { randomUUID } from 'node:crypto'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import z from '@deepseek-ai/schemastery'
+import { installSettingsSection, settingsNamespace } from '@deepseek-ai/dsh-settings'
 
 export const name = 'chat2skill-deepseek-harness'
 export const inject = ['subprocess']
 
 const PLUGIN_ID = 'chat2skill'
+const SETTINGS_NAMESPACE = settingsNamespace('chat2skill')
+const SETTINGS_SCHEMA = z.object({
+  enabled: z.boolean().default(true),
+  python: z.string().default('python3'),
+  projectDir: z.string().default(''),
+  responseGuard: z.string().default('strict'),
+})
 const ADAPTER_DIR = dirname(fileURLToPath(import.meta.url))
 const CHAT2SKILL_ROOT = join(ADAPTER_DIR, '..', '..')
 const BRIDGE_PATH = join(CHAT2SKILL_ROOT, 'scripts', 'deepseek_harness_adapter.py')
 
 export function apply(ctx, rawConfig = {}) {
-  const config = resolveConfig(rawConfig)
-  if (!config.enabled) return
+  const entryConfig = resolveConfig(rawConfig)
+  let readConfig = () => entryConfig
+  let config = entryConfig
+
+  // Keep the browser control live without disabling this Loader entry. If the
+  // entry itself were disabled, its browser half would disappear as well and
+  // there would be no left-sidebar control to turn it back on.
+  installSettingsSection(ctx, SETTINGS_NAMESPACE, SETTINGS_SCHEMA, entryConfig, {
+    setSource: source => {
+      readConfig = source
+      config = resolveConfig(source())
+    },
+    onChange: () => {
+      config = resolveConfig(readConfig())
+    },
+  })
 
   ctx.on('agent/pre-step', async ({ agent, messages, signal }, next) => {
+    if (!config.enabled) return next()
     const prompt = latestUserPrompt(messages)
     const downstream = await next()
     if (!prompt || downstream.kind !== 'enter' || signal.aborted) return downstream
@@ -39,7 +63,7 @@ export function apply(ctx, rawConfig = {}) {
   })
 
   ctx.on('agent/turn-stopping', async ({ agent, turn, signal }) => {
-    if (signal.aborted) return
+    if (!config.enabled || signal.aborted) return
     const messages = conversationMessages(agent.session.events)
     const assistantMessage = assistantTextForTurn(agent.session.events, turn)
     if (!assistantMessage) return

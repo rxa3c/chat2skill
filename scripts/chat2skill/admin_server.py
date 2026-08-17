@@ -357,7 +357,7 @@ def create_app(token: str) -> FastAPI:
 
 
 def _connect() -> sqlite3.Connection:
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     conn.row_factory = sqlite3.Row
     return conn
 
@@ -910,7 +910,7 @@ def _project_status(user_id: str) -> str:
 def _set_project_status(user_id: str, status: str) -> None:
     now = datetime.now().isoformat()
     archived_at = now if status == "archived" else None
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -936,7 +936,7 @@ def _project_by_user_id(user_id: str) -> Optional[dict]:
 
 
 def _delete_project(user_id: str) -> bool:
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     c = conn.cursor()
     tables = [
         "project_skills",
@@ -1112,7 +1112,7 @@ def _update_skill(user_id: str, skill_name: str, patch: SkillPatch) -> Optional[
     skill.updated_at = datetime.now().isoformat()
     skill.refresh_embedding_text()
 
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -1147,7 +1147,7 @@ def _update_skill(user_id: str, skill_name: str, patch: SkillPatch) -> Optional[
 
 
 def _delete_skill(user_id: str, skill_name: str) -> bool:
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     c = conn.cursor()
     c.execute("DELETE FROM skill_records WHERE user_id = ? AND name = ?", (user_id, skill_name))
     deleted = c.rowcount > 0
@@ -1220,7 +1220,7 @@ def _update_memory(user_id: str, context_key: str, memory_id: str, patch: Memory
     assignments.append("updated_at = ?")
     params.append(datetime.now().isoformat())
     params.extend([user_id, context_key, memory_id])
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     c = conn.cursor()
     c.execute(
         f"""
@@ -1237,7 +1237,7 @@ def _update_memory(user_id: str, context_key: str, memory_id: str, patch: Memory
 
 
 def _delete_memory(user_id: str, context_key: str, memory_id: str) -> bool:
-    conn = sqlite3.connect(str(storage.DB_PATH))
+    conn = storage.connect_db()
     c = conn.cursor()
     c.execute(
         "DELETE FROM memory_items WHERE user_id = ? AND context_key = ? AND id = ?",

@@ -6,6 +6,7 @@ import hashlib
 import json
 import re
 import sqlite3
+import threading
 from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
@@ -23,15 +24,38 @@ from .similarity import (
 DB_PATH = DATA_HOME / "c2s.db"
 LEGACY_DB_PATH = DATA_HOME / "chat2skill.db"
 SKILL_DIR = DATA_HOME / "skills"
+SQLITE_TIMEOUT_SECONDS = 30
+SQLITE_BUSY_TIMEOUT_MS = 30_000
+_INIT_LOCK = threading.Lock()
+_INITIALIZED_DB_PATH: Optional[Path] = None
+
+
+def connect_db(*, row_factory=None) -> sqlite3.Connection:
+    """Open a database connection that tolerates short cross-process writes."""
+    conn = sqlite3.connect(str(DB_PATH), timeout=SQLITE_TIMEOUT_SECONDS)
+    conn.execute(f"PRAGMA busy_timeout={SQLITE_BUSY_TIMEOUT_MS}")
+    if row_factory is not None:
+        conn.row_factory = row_factory
+    return conn
 
 
 def init_db():
-    """Initialize SQLite database."""
+    """Initialize SQLite database once per process and database path."""
+    global _INITIALIZED_DB_PATH
+    with _INIT_LOCK:
+        if _INITIALIZED_DB_PATH == DB_PATH and DB_PATH.exists():
+            return
+        _initialize_db()
+        _INITIALIZED_DB_PATH = DB_PATH
+
+
+def _initialize_db():
+    """Create or migrate the local schema."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     SKILL_DIR.mkdir(parents=True, exist_ok=True)
     _migrate_legacy_db()
     
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     
     c.execute("""
@@ -440,7 +464,7 @@ def save_project_skill(
     source_memory_count: Optional[int] = None,
 ):
     now = datetime.now().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -481,7 +505,7 @@ def save_project_skill_sources(
     sources: List[dict],
 ):
     now = datetime.now().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -520,7 +544,7 @@ def load_project_skill_sources(
     user_id: str,
     project_skill_version: Optional[int] = None,
 ) -> List[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     params: list = [user_id]
@@ -543,7 +567,7 @@ def load_project_skill_sources(
 
 
 def load_project_skill(user_id: str) -> Optional[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     row = c.execute(
         """
@@ -579,7 +603,7 @@ def _project_skill_language(content: str) -> Optional[str]:
 def save_conversation(session_id: str, user_id: str, messages: list, feedback: Optional[dict] = None):
     """Save conversation to local DB."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "INSERT OR REPLACE INTO conversations VALUES (?, ?, ?, ?, ?)",
@@ -591,7 +615,7 @@ def save_conversation(session_id: str, user_id: str, messages: list, feedback: O
 
 def load_conversations(user_id: str, limit: int = 100) -> list:
     """Load recent conversations for a user."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "SELECT session_id, messages, feedback, timestamp FROM conversations WHERE user_id = ? ORDER BY timestamp DESC LIMIT ?",
@@ -611,7 +635,7 @@ def load_conversations(user_id: str, limit: int = 100) -> list:
 
 
 def load_conversation(user_id: str, session_id: str) -> Optional[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     row = c.execute(
         """
@@ -665,7 +689,7 @@ def save_skill(skill: Skill, user_id: str = "default", embedding_client=None):
             _merge_into_existing(skill, merge_target)
     _sync_skill_content_metadata(skill)
     
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -833,7 +857,7 @@ def save_memory_items(items: List[MemoryItem], user_id: str, skill_name: Optiona
     """Persist extracted evidence items."""
     if not items:
         return
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.executemany(
         """
@@ -867,7 +891,7 @@ def load_skill_memory_items(
     skill_names: Optional[List[str]] = None,
 ) -> dict[str, List[dict]]:
     """Load C2S evidence items grouped by source skill name."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.row_factory = sqlite3.Row
     c = conn.cursor()
     params: list[str] = [user_id]
@@ -906,7 +930,7 @@ def load_skill_memory_items(
 
 
 def _save_memory_dicts(items: List[dict], user_id: str, skill_name: Optional[str] = None):
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     # Re-extraction of the same session replaces its items instead of stacking.
     sessions = {item.get("source_session", "") for item in items if item.get("source_session")}
@@ -944,7 +968,7 @@ def _save_memory_dicts(items: List[dict], user_id: str, skill_name: Optional[str
 
 def load_skills(user_id: Optional[str] = None, include_pending: bool = True) -> List[Skill]:
     """Load skills from local DB, optionally scoped to one user."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     where = []
     params = []
@@ -973,7 +997,7 @@ def load_skills(user_id: Optional[str] = None, include_pending: bool = True) -> 
 
 def get_skill(name: str, user_id: str = "default") -> Optional[Skill]:
     """Get single skill by name."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -998,7 +1022,7 @@ def record_skill_usage(user_id: str, skill_names: List[str]):
     if not skill_names:
         return
     now = datetime.now().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.executemany(
         "INSERT INTO skill_usage (user_id, skill_name, used_at) VALUES (?, ?, ?)",
@@ -1013,7 +1037,7 @@ def load_usage_counts(user_id: str, days: int = 30) -> dict:
     from datetime import timedelta
 
     cutoff = (datetime.now() - timedelta(days=days)).isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "SELECT skill_name, COUNT(*) FROM skill_usage WHERE user_id = ? AND used_at >= ? GROUP BY skill_name",
@@ -1026,7 +1050,7 @@ def load_usage_counts(user_id: str, days: int = 30) -> dict:
 
 def set_skill_status(name: str, user_id: str, status: str, note: Optional[str] = None):
     """Change a skill's lifecycle status (e.g. archive during maintenance)."""
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     if note:
         row = c.execute(
@@ -1066,7 +1090,7 @@ def absorb_skill_sources(winner_name: str, loser_name: str, user_id: str):
     new_sessions = [s for s in loser.source_sessions if s not in winner.source_sessions]
     merged_sessions = sorted(set(winner.source_sessions + loser.source_sessions))
     evidence = winner.evidence_count + (loser.evidence_count if new_sessions else 0)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "UPDATE skill_records SET source_sessions = ?, evidence_count = ?, updated_at = ? WHERE user_id = ? AND name = ?",
@@ -1077,7 +1101,7 @@ def absorb_skill_sources(winner_name: str, loser_name: str, user_id: str):
 
 
 def load_user_profile(user_id: str) -> UserModel:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute("SELECT profile_json FROM user_profiles WHERE user_id = ?", (user_id,))
     row = c.fetchone()
@@ -1088,7 +1112,7 @@ def load_user_profile(user_id: str) -> UserModel:
 
 
 def save_user_profile(profile: UserModel):
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         "INSERT OR REPLACE INTO user_profiles VALUES (?, ?, ?)",
@@ -1099,7 +1123,7 @@ def save_user_profile(profile: UserModel):
 
 
 def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     context_row = c.execute(
         """
@@ -1162,7 +1186,7 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
 def save_project_memory_context(user_id: str, context_key: str, context: dict):
     now = datetime.now().isoformat()
     project_dir = context.get("project_dir", "")
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -1236,7 +1260,7 @@ def save_project_memory_materialization(user_id: str, context_key: str, material
         if isinstance(feedback, (dict, list))
         else feedback
     )
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -1286,7 +1310,7 @@ def record_project_memory_activity(
         raw_input_hash = hashlib.sha256(raw_input.encode("utf-8")).hexdigest()
     if not raw_input_hash and not memory.get("delta_batch") and not raw_input:
         return
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -1324,7 +1348,7 @@ def record_materialization_outcome(
 ) -> Optional[dict]:
     """Store prompt outcome and reconsolidate included memories."""
     now = datetime.now().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.row_factory = sqlite3.Row
     row = conn.execute(
         """
@@ -1397,7 +1421,7 @@ def load_memory_activities(
     limit: int = 100,
     with_raw_input: bool = False,
 ) -> list[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.row_factory = sqlite3.Row
     where = "WHERE user_id = ? AND context_key = ?"
     params: list = [user_id, context_key]
@@ -1426,7 +1450,7 @@ def update_memory_activity_input(
     raw_messages: list[dict],
     input_embedding: list[float],
 ) -> None:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.execute(
         """
         UPDATE memory_activity
@@ -1480,7 +1504,7 @@ def load_project_memories_by_ids(user_id: str, context_key: str, memory_ids: lis
     if not ids:
         return []
     placeholders = ",".join("?" for _ in ids)
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     rows = conn.execute(
         f"""
         SELECT id, content, memory_type, section, salience, confidence, embedding,
@@ -1501,7 +1525,7 @@ def save_eval_run(result: dict) -> str:
     if not run_id:
         raise ValueError("eval result missing run_id")
     now = datetime.now().isoformat()
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     c = conn.cursor()
     c.execute(
         """
@@ -1558,7 +1582,7 @@ def save_eval_run(result: dict) -> str:
 
 
 def list_eval_runs(user_id: str, limit: int = 50) -> list[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.row_factory = sqlite3.Row
     rows = conn.execute(
         """
@@ -1583,7 +1607,7 @@ def list_eval_runs(user_id: str, limit: int = 50) -> list[dict]:
 
 
 def load_eval_run(run_id: str, user_id: Optional[str] = None) -> Optional[dict]:
-    conn = sqlite3.connect(str(DB_PATH))
+    conn = connect_db()
     conn.row_factory = sqlite3.Row
     run = conn.execute(
         "SELECT * FROM eval_runs WHERE run_id = ?",

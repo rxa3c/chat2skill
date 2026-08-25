@@ -1,0 +1,386 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta
+      name="description"
+      content="Chat2Skill gives coding agents a local memory layer that learns from your feedback and recalls the right context when you need it."
+    />
+    <meta name="theme-color" content="#f5f6f2" />
+    <title>Chat2Skill - Memory that compounds</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="https://unpkg.com/lucide@0.468.0/dist/umd/lucide.js" defer></script>
+    <script src="./main.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Skip to content</a>
+
+    <header class="site-header">
+      <div class="shell header-inner">
+        <a class="brand" href="#top" aria-label="Chat2Skill home">
+          <span class="brand-mark" aria-hidden="true">
+            <span></span><span></span><span></span>
+          </span>
+          <span>Chat2Skill</span>
+        </a>
+
+        <button class="menu-toggle icon-button" type="button" aria-label="Open navigation" aria-expanded="false">
+          <i data-lucide="menu" aria-hidden="true"></i>
+        </button>
+
+        <nav class="site-nav" aria-label="Primary navigation">
+          <a href="#loop">How it works</a>
+          <a href="#admin">Admin Console</a>
+          <a href="#integrations">Integrations</a>
+          <a href="#privacy">Privacy</a>
+          <a href="https://github.com/rxa3c/chat2skill" target="_blank" rel="noreferrer">
+            GitHub <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+          </a>
+          <a class="nav-cta" href="#install">Install <i data-lucide="arrow-down" aria-hidden="true"></i></a>
+        </nav>
+      </div>
+    </header>
+
+    <main id="main-content">
+      <section class="hero shell" id="top">
+        <div class="hero-copy">
+          <p class="eyebrow"><span class="eyebrow-dot"></span> Local-first memory for coding agents</p>
+          <h1>Make every session <em>compound.</em></h1>
+          <p class="hero-lede">
+            Chat2Skill learns the decisions, preferences, and project context hidden in your conversations,
+            then brings the right pieces back before the next task begins.
+          </p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#install">
+              <i data-lucide="download" aria-hidden="true"></i>
+              Install Chat2Skill
+            </a>
+            <a class="button button-quiet" href="#loop">
+              <i data-lucide="play-circle" aria-hidden="true"></i>
+              See the loop
+            </a>
+          </div>
+          <div class="hero-proof">
+            <i data-lucide="shield-check" aria-hidden="true"></i>
+            <span>Skills and history stay on your machine. Extraction is stateless.</span>
+          </div>
+        </div>
+
+        <div class="hero-visual" aria-label="Chat2Skill local memory interface preview">
+          <div class="product-window">
+            <div class="window-chrome">
+              <div class="window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+              <span class="window-title">CHAT2SKILL / PROJECT MEMORY</span>
+              <span class="window-live"><span></span> local</span>
+            </div>
+            <div class="window-toolbar">
+              <div class="project-name">
+                <span class="project-icon">CS</span>
+                <span><small>ACTIVE PROJECT</small><strong>chat2skill</strong></span>
+                <i data-lucide="chevrons-up-down" aria-hidden="true"></i>
+              </div>
+              <span class="signal-count"><i data-lucide="sparkles" aria-hidden="true"></i> 3 signals captured</span>
+            </div>
+            <div class="window-content">
+              <div class="prompt-line">
+                <span class="prompt-mark">&gt;_</span>
+                <span>refactor storage without changing the contract</span>
+              </div>
+              <div class="retrieval-heading"><span>RETRIEVED FOR THIS TASK</span><span>3 items</span></div>
+              <div class="memory-row">
+                <span class="memory-icon memory-icon-teal"><i data-lucide="database-zap" aria-hidden="true"></i></span>
+                <span class="memory-copy"><strong>Keep local data durable</strong><small>Project memory / storage</small></span>
+                <span class="memory-score">0.94</span>
+              </div>
+              <div class="memory-row">
+                <span class="memory-icon memory-icon-blue"><i data-lucide="git-branch" aria-hidden="true"></i></span>
+                <span class="memory-copy"><strong>Preserve the current CLI path</strong><small>Preference / workflow</small></span>
+                <span class="memory-score">0.88</span>
+              </div>
+              <div class="memory-row">
+                <span class="memory-icon memory-icon-orange"><i data-lucide="badge-check" aria-hidden="true"></i></span>
+                <span class="memory-copy"><strong>Run focused tests before refactoring</strong><small>Procedure / verification</small></span>
+                <span class="memory-score">0.81</span>
+              </div>
+            </div>
+            <div class="window-footer">
+              <span><i data-lucide="history" aria-hidden="true"></i> context recalled</span>
+              <span><i data-lucide="hard-drive" aria-hidden="true"></i> ~/.chat2skill/c2s.db</span>
+            </div>
+          </div>
+          <div class="visual-caption"><span class="caption-line"></span> Your context, ready before the work starts.</div>
+        </div>
+      </section>
+
+      <section class="signal-strip" aria-label="Product principles">
+        <div class="shell signal-grid">
+          <div class="signal-item"><strong>LOCAL-FIRST</strong><span>Memory stays in your local store</span></div>
+          <div class="signal-item"><strong>FEEDBACK-LED</strong><span>Corrections become reusable rules</span></div>
+          <div class="signal-item"><strong>MODEL-AGNOSTIC</strong><span>Bring the provider you already use</span></div>
+          <div class="signal-item"><strong>MIT LICENSED</strong><span>Open source and inspectable</span></div>
+        </div>
+      </section>
+
+      <section class="section shell" id="loop">
+        <div class="section-heading section-heading-split">
+          <div>
+            <p class="section-kicker">01 / The learning loop</p>
+            <h2>Memory is a workflow, not a scrapbook.</h2>
+          </div>
+          <p>
+            Chat2Skill watches for signals that should change future work. It distills them into durable artifacts,
+            validates what is worth keeping, and retrieves only what matches the task in front of you.
+          </p>
+        </div>
+
+        <div class="loop-layout">
+          <div class="step-list" role="tablist" aria-label="Chat2Skill learning loop">
+            <button class="step-tab is-active" type="button" role="tab" aria-selected="true" data-step="capture">
+              <span class="step-number">01</span>
+              <span class="step-label"><strong>Capture</strong><small>Notice the signal</small></span>
+              <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </button>
+            <button class="step-tab" type="button" role="tab" aria-selected="false" data-step="distill">
+              <span class="step-number">02</span>
+              <span class="step-label"><strong>Distill</strong><small>Turn it into a skill</small></span>
+              <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </button>
+            <button class="step-tab" type="button" role="tab" aria-selected="false" data-step="recall">
+              <span class="step-number">03</span>
+              <span class="step-label"><strong>Recall</strong><small>Bring back what matters</small></span>
+              <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </button>
+            <button class="step-tab" type="button" role="tab" aria-selected="false" data-step="guard">
+              <span class="step-number">04</span>
+              <span class="step-label"><strong>Guard</strong><small>Keep answers grounded</small></span>
+              <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+            </button>
+          </div>
+
+          <div class="loop-stage" role="tabpanel" aria-live="polite">
+            <div class="stage-header"><span id="stage-kicker">SESSION END</span><span id="stage-status"><span class="status-dot"></span> signal detected</span></div>
+            <div class="stage-main">
+              <div class="stage-icon" id="stage-icon"><i data-lucide="scan-search" aria-hidden="true"></i></div>
+              <div>
+                <h3 id="stage-title">A correction is more than a correction.</h3>
+                <p id="stage-copy">When you say "keep this behavior" or "that is not verified," Chat2Skill recognizes a durable signal instead of letting it disappear with the transcript.</p>
+              </div>
+            </div>
+            <div class="stage-terminal" id="stage-terminal">
+              <div class="terminal-bar"><span></span><span></span><span></span><b>chat2skill / extract</b></div>
+              <div class="terminal-line"><span class="terminal-prompt">01</span><span>signal.type</span><strong>constraint</strong></div>
+              <div class="terminal-line"><span class="terminal-prompt">02</span><span>evidence</span><strong>user correction</strong></div>
+              <div class="terminal-line"><span class="terminal-prompt">03</span><span>next</span><strong class="terminal-accent">analyze -&gt; validate -&gt; store</strong></div>
+            </div>
+            <div class="stage-footer"><span><i data-lucide="circle-check" aria-hidden="true"></i> durable by default</span><span id="stage-artifact">output: memory item + candidate skill</span></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section keep-section">
+        <div class="shell">
+          <div class="section-heading narrow-heading">
+            <p class="section-kicker">02 / What it keeps</p>
+            <h2>Three layers. One quieter next session.</h2>
+            <p>Every artifact has a job, a scope, and a place on your machine.</p>
+          </div>
+
+          <div class="keep-grid">
+            <article class="keep-item keep-item-teal">
+              <div class="keep-top"><span class="keep-index">A</span><i data-lucide="database" aria-hidden="true"></i></div>
+              <h3>Project memory</h3>
+              <p>Decisions, facts, procedures, and warnings that belong to the project you are working on.</p>
+              <code>~/.chat2skill/c2s.db</code>
+            </article>
+            <article class="keep-item keep-item-blue">
+              <div class="keep-top"><span class="keep-index">B</span><i data-lucide="file-cog" aria-hidden="true"></i></div>
+              <h3>Atomized skills</h3>
+              <p>Focused, reusable <code>SKILL.md</code> files for preferences, procedures, and successful patterns.</p>
+              <code>skills/&lt;user&gt;/&lt;name&gt;/</code>
+            </article>
+            <article class="keep-item keep-item-orange">
+              <div class="keep-top"><span class="keep-index">C</span><i data-lucide="shield-check" aria-hidden="true"></i></div>
+              <h3>Response guard</h3>
+              <p>Evidence-based rules that make the assistant distinguish verified conclusions from missing evidence.</p>
+              <code>response_guard</code>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="admin-section" id="admin">
+        <div class="shell">
+          <div class="section-heading section-heading-split admin-heading">
+            <div>
+              <p class="section-kicker">03 / Admin Console</p>
+              <h2>See what your assistant learned. Shape what happens next.</h2>
+            </div>
+            <p>
+              Chat2Skill includes a local-only management page for reviewing project memory and skills. Search the
+              evidence, edit what needs correction, and rebuild the project skill before the next session.
+            </p>
+          </div>
+
+          <div class="admin-layout">
+            <div class="admin-window" aria-label="Chat2Skill Admin Console interface preview">
+              <div class="admin-window-bar">
+                <div class="admin-window-dots" aria-hidden="true"><span></span><span></span><span></span></div>
+                <span>CHAT2SKILL ADMIN</span>
+                <span class="admin-local-badge"><i data-lucide="lock-keyhole" aria-hidden="true"></i> local only</span>
+              </div>
+              <div class="admin-app-preview">
+                <aside class="admin-sidebar-preview">
+                  <div class="admin-brand-preview"><strong>Chat2Skill Admin</strong><i data-lucide="refresh-cw" aria-hidden="true"></i></div>
+                  <div class="admin-search-preview"><i data-lucide="search" aria-hidden="true"></i><span>Search projects</span></div>
+                  <div class="admin-project-preview is-active">
+                    <strong>chat2skill</strong>
+                    <span>~/Projects/assistant-memory</span>
+                    <span>12 skills · 24 memories</span>
+                    <small>updated just now</small>
+                  </div>
+                  <div class="admin-project-preview">
+                    <strong>client-portal</strong>
+                    <span>~/Projects/client-portal</span>
+                    <span>7 skills · 11 memories</span>
+                    <small>updated yesterday</small>
+                  </div>
+                </aside>
+                <div class="admin-main-preview">
+                  <div class="admin-topbar-preview">
+                    <div><small>ACTIVE PROJECT</small><strong>chat2skill</strong><span>~/Projects/assistant-memory</span></div>
+                    <div class="admin-preview-actions"><span>Archive</span><span>Reload Projects</span></div>
+                  </div>
+                  <div class="admin-tabs-preview">
+                    <span class="is-active">skills</span><span>memories</span><span>prompts</span><span>project-skill</span><span>overview</span><span>evals</span>
+                  </div>
+                  <div class="admin-toolbar-preview"><span>Search skills</span><span>active</span><span>12 rows</span></div>
+                  <div class="admin-data-preview">
+                    <div class="admin-list-preview">
+                      <div class="admin-list-row is-active"><strong>response-guard-evidence</strong><span>active · preference · evidence 4</span><small>updated today</small></div>
+                      <div class="admin-list-row"><strong>run-focused-tests</strong><span>active · procedure · evidence 3</span><small>updated yesterday</small></div>
+                      <div class="admin-list-row"><strong>preserve-cli-contract</strong><span>active · constraint · evidence 2</span><small>updated Aug 21</small></div>
+                    </div>
+                    <div class="admin-detail-preview">
+                      <small>SKILL DETAIL</small>
+                      <h4>response-guard-evidence</h4>
+                      <div class="admin-field-preview"><span>Type</span><strong>preference</strong></div>
+                      <div class="admin-field-preview"><span>Status</span><strong class="admin-active-text">active</strong></div>
+                      <div class="admin-field-preview admin-field-tall"><span>Content</span><p>Use definitive wording for verified facts. Name the missing evidence and next validation step when evidence is absent.</p></div>
+                      <div class="admin-save-preview"><span><i data-lucide="save" aria-hidden="true"></i> Save</span><span>Mark Archived</span></div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div class="admin-benefits">
+              <div class="admin-benefit">
+                <span class="admin-benefit-icon"><i data-lucide="folder-search" aria-hidden="true"></i></span>
+                <div><h3>Review by project</h3><p>Switch between projects discovered in your local database and see active skills, memories, and update times at a glance.</p></div>
+              </div>
+              <div class="admin-benefit">
+                <span class="admin-benefit-icon"><i data-lucide="file-pen-line" aria-hidden="true"></i></span>
+                <div><h3>Edit the source of truth</h3><p>Search, edit, activate, archive, or delete atomized skills and project memories instead of accepting every extraction blindly.</p></div>
+              </div>
+              <div class="admin-benefit">
+                <span class="admin-benefit-icon"><i data-lucide="layers-3" aria-hidden="true"></i></span>
+                <div><h3>Rebuild the project skill</h3><p>Inspect source snapshots, edit the generated <code>PROJECT_SKILL.md</code>, rebuild it, and run evaluations from one local workspace.</p></div>
+              </div>
+              <div class="admin-command"><span><i data-lucide="terminal" aria-hidden="true"></i> Start locally</span><code>python3 scripts/chat2skill_admin.py</code></div>
+              <a class="text-link" href="https://github.com/rxa3c/chat2skill#local-admin-ui" target="_blank" rel="noreferrer">Read the Admin Console guide <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section shell" id="integrations">
+        <div class="section-heading section-heading-split integrations-heading">
+          <div>
+            <p class="section-kicker">04 / Integrations</p>
+            <h2>Bring it to the agent you already use.</h2>
+          </div>
+          <p>
+            Native lifecycle support is available where the host exposes hooks. Other agents can use the same
+            retrieval and learning scripts through project rules or the CLI.
+          </p>
+        </div>
+
+        <div class="integration-groups">
+          <div class="integration-group">
+            <div class="group-label"><span class="group-dot group-dot-primary"></span><strong>Native lifecycle integrations</strong><span>retrieve + learn + guard where exposed</span></div>
+            <div class="integration-grid">
+              <div class="integration-item"><span class="integration-mark mark-claude">C</span><span><strong>Claude Code</strong><small>Native plugin marketplace</small></span><i data-lucide="check" aria-hidden="true"></i></div>
+              <div class="integration-item"><span class="integration-mark mark-codex">⌘</span><span><strong>Codex</strong><small>Native plugin and hooks</small></span><i data-lucide="check" aria-hidden="true"></i></div>
+              <div class="integration-item"><span class="integration-mark mark-deepseek">D</span><span><strong>DeepSeek Harness</strong><small>Native Cordis bundle</small></span><i data-lucide="check" aria-hidden="true"></i></div>
+              <div class="integration-item"><span class="integration-mark mark-cursor">↗</span><span><strong>Cursor</strong><small>Native plugin and project rule</small></span><i data-lucide="check" aria-hidden="true"></i></div>
+            </div>
+          </div>
+          <div class="integration-group integration-group-secondary">
+            <div class="group-label"><span class="group-dot group-dot-secondary"></span><strong>Rules and CLI paths</strong><span>retrieval or manual learning</span></div>
+            <div class="support-list">
+              <span>OpenCode</span><span>GitHub Copilot</span><span>Windsurf / Cascade</span><span>Kiro</span><span>Cline</span><span>Aider / generic agents</span>
+            </div>
+          </div>
+        </div>
+        <a class="text-link" href="https://github.com/rxa3c/chat2skill/blob/main/docs/agent-portability.md" target="_blank" rel="noreferrer">
+          Read the adapter map <i data-lucide="arrow-up-right" aria-hidden="true"></i>
+        </a>
+      </section>
+
+      <section class="install-section" id="install">
+        <div class="shell install-layout">
+          <div class="install-copy">
+            <p class="section-kicker">05 / Start here</p>
+            <h2>Use the host you already trust.</h2>
+            <p>Install the plugin, let the first hook initialize local storage, and keep your existing model credentials in your own environment.</p>
+            <div class="install-facts">
+              <span><i data-lucide="terminal" aria-hidden="true"></i> Python 3.10+</span>
+              <span><i data-lucide="key-round" aria-hidden="true"></i> Bring your own key</span>
+              <span><i data-lucide="github" aria-hidden="true"></i> Open source</span>
+            </div>
+          </div>
+          <div class="install-panel">
+            <div class="install-tabs" role="tablist" aria-label="Installation options">
+              <button class="install-tab is-active" type="button" role="tab" aria-selected="true" data-install="codex">Codex</button>
+              <button class="install-tab" type="button" role="tab" aria-selected="false" data-install="claude">Claude Code</button>
+              <button class="install-tab" type="button" role="tab" aria-selected="false" data-install="harness">DeepSeek</button>
+            </div>
+            <div class="code-panel">
+              <div class="code-panel-top"><span id="install-label">Install from the marketplace</span><button class="copy-button" type="button" data-copy aria-label="Copy installation command" title="Copy installation command"><i data-lucide="copy" aria-hidden="true"></i><span>Copy</span></button></div>
+              <pre><code id="install-command">codex plugin marketplace add rxa3c/chat2skill
+codex</code></pre>
+            </div>
+            <a class="panel-link" href="https://github.com/rxa3c/chat2skill#install" target="_blank" rel="noreferrer">Open full installation guide <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+          </div>
+        </div>
+      </section>
+
+      <section class="privacy-section" id="privacy">
+        <div class="shell privacy-layout">
+          <div>
+            <p class="section-kicker section-kicker-light">06 / Privacy by architecture</p>
+            <h2>Your context should work for you, not leave your machine by default.</h2>
+          </div>
+          <div class="privacy-points">
+            <div class="privacy-point"><span class="privacy-number">01</span><div><strong>Local retrieval</strong><p>Prompt retrieval reads your local SQLite store. It does not call the cloud.</p></div></div>
+            <div class="privacy-point"><span class="privacy-number">02</span><div><strong>Stateless extraction</strong><p>Stop-hook transcripts are analyzed in memory and are not persisted server-side.</p></div></div>
+            <div class="privacy-point"><span class="privacy-number">03</span><div><strong>Credential ownership</strong><p>Use your own API key or approved token. The Chat2Skill server never persists provider credentials.</p></div></div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site-footer">
+      <div class="shell footer-inner">
+        <div class="footer-brand"><span class="brand-mark" aria-hidden="true"><span></span><span></span><span></span></span><strong>Chat2Skill</strong><span>Memory that compounds.</span></div>
+        <div class="footer-links">
+          <a href="https://github.com/rxa3c/chat2skill" target="_blank" rel="noreferrer">GitHub <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+          <a href="https://github.com/rxa3c/chat2skill/blob/main/README.md" target="_blank" rel="noreferrer">README <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+          <a href="https://github.com/rxa3c/chat2skill/blob/main/LICENSE" target="_blank" rel="noreferrer">MIT License <i data-lucide="arrow-up-right" aria-hidden="true"></i></a>
+        </div>
+        <span class="footer-note">Built for durable work.</span>
+      </div>
+    </footer>
+  </body>
+</html>

@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://rxa3c.github.io/chat2skill/sitemap.xml

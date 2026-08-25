@@ -15,6 +15,10 @@ from .models import Skill
 from .i18n import LANGUAGES
 
 
+VECTOR_EVIDENCE_SCORE = 0.70
+LEXICAL_EVIDENCE_SCORE = 0.12
+
+
 @dataclass
 class RetrievedSkill:
     skill: Skill
@@ -39,9 +43,15 @@ class SkillRetriever:
         "success_pattern": 2,
     }
 
-    def __init__(self, embedding_client=None, embedding_model: Optional[str] = None):
+    def __init__(
+        self,
+        embedding_client=None,
+        embedding_model: Optional[str] = None,
+        min_vector_score: float = 0.55,
+    ):
         self.embedding_client = embedding_client
         self.embedding_model = embedding_model
+        self.min_vector_score = min_vector_score
 
     def retrieve(
         self,
@@ -50,9 +60,11 @@ class SkillRetriever:
         top_k: int = 6,
         active_only: bool = True,
         min_score: float = 0.0,
+        query_vector: Optional[List[float]] = None,
     ) -> List[RetrievedSkill]:
         query_tokens = self._tokens(task_text)
-        query_vector = self._embed_query(task_text)
+        if query_vector is None:
+            query_vector = self._embed_query(task_text)
         candidates: List[RetrievedSkill] = []
         type_counts: dict[str, int] = {}
 
@@ -107,12 +119,17 @@ class SkillRetriever:
         return "\n".join(parts).strip()
 
     def _embed_query(self, task_text: str) -> Optional[List[float]]:
-        if not self.embedding_client or not hasattr(self.embedding_client, "embed"):
+        if not self.embedding_client:
             return None
         try:
-            return self.embedding_client.embed(task_text, model=self.embedding_model)
+            embed_query = getattr(self.embedding_client, "embed_query", None)
+            if callable(embed_query):
+                return embed_query(task_text, model=self.embedding_model)
+            if hasattr(self.embedding_client, "embed"):
+                return self.embedding_client.embed(task_text, model=self.embedding_model)
         except Exception:
-            return None
+            pass
+        return None
 
     def _score(
         self,
@@ -121,11 +138,15 @@ class SkillRetriever:
         skill: Skill,
         skill_text: str,
     ) -> float:
+        vector_score = 0.0
         if query_vector and skill.embedding_vector:
             vector_score = similarity.cosine(query_vector, skill.embedding_vector)
-            if vector_score > 0:
-                return vector_score
-        return similarity.jaccard(query_tokens, self._tokens(skill_text))
+            if vector_score < self.min_vector_score:
+                vector_score = 0.0
+        lexical_score = similarity.jaccard(query_tokens, self._tokens(skill_text))
+        if vector_score and lexical_score < LEXICAL_EVIDENCE_SCORE and vector_score < VECTOR_EVIDENCE_SCORE:
+            vector_score = 0.0
+        return max(vector_score, lexical_score)
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
@@ -175,7 +196,7 @@ class MemoryRetriever:
         self,
         embedding_client=None,
         embedding_model: Optional[str] = None,
-        min_vector_score: float = 0.3,
+        min_vector_score: float = 0.55,
     ):
         self.embedding_client = embedding_client
         self.embedding_model = embedding_model
@@ -188,9 +209,11 @@ class MemoryRetriever:
         top_k: int = 12,
         active_only: bool = True,
         min_score: float = 0.0,
+        query_vector: Optional[List[float]] = None,
     ) -> List[RetrievedMemory]:
         query_tokens = SkillRetriever._tokens(task_text)
-        query_vector = self._embed_query(task_text)
+        if query_vector is None:
+            query_vector = self._embed_query(task_text)
         candidates: List[RetrievedMemory] = []
 
         for memory in memories:
@@ -243,12 +266,17 @@ class MemoryRetriever:
         )
 
     def _embed_query(self, task_text: str) -> Optional[List[float]]:
-        if not self.embedding_client or not hasattr(self.embedding_client, "embed"):
+        if not self.embedding_client:
             return None
         try:
-            return self.embedding_client.embed(task_text, model=self.embedding_model)
+            embed_query = getattr(self.embedding_client, "embed_query", None)
+            if callable(embed_query):
+                return embed_query(task_text, model=self.embedding_model)
+            if hasattr(self.embedding_client, "embed"):
+                return self.embedding_client.embed(task_text, model=self.embedding_model)
         except Exception:
-            return None
+            pass
+        return None
 
     def _score(
         self,
@@ -265,14 +293,13 @@ class MemoryRetriever:
             vector = similarity.cosine(query_vector, memory_vector)
             if vector < self.min_vector_score:
                 vector = 0.0
-        base = max(lexical + exact, vector)
+        if vector and lexical < LEXICAL_EVIDENCE_SCORE and vector < VECTOR_EVIDENCE_SCORE:
+            vector = 0.0
+        lexical_score = min(1.0, lexical + exact)
+        base = max(lexical_score, vector)
         if query_tokens and base <= 0:
             return 0.0
-        salience = float(memory.get("salience") or 0.5)
-        confidence = float(memory.get("confidence") or 0.5)
-        memory_type = str(memory.get("memory_type") or "fact")
-        type_boost = self.TYPE_WEIGHT.get(memory_type, 0.05)
-        return base + (salience * 0.08) + (confidence * 0.06) + type_boost
+        return base
 
     @staticmethod
     def _exact_boost(query_tokens: set[str], memory_text: str) -> float:

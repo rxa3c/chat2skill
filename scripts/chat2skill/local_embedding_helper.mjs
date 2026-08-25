@@ -6,6 +6,7 @@ if (!process.env.ORT_LOG_LEVEL) {
 
 const DEFAULT_MODEL = "Snowflake/snowflake-arctic-embed-xs";
 const DEFAULT_DIMS = 384;
+const QUERY_PREFIX = "Represent this sentence for searching relevant passages: ";
 
 async function readStdin() {
   let input = "";
@@ -63,8 +64,11 @@ async function main() {
       executionMode: "sequential",
     },
   });
-  const result = await embedder(texts.length === 1 ? texts[0] : texts, {
-    pooling: "mean",
+  const inputs = payload.query === true
+    ? texts.map((text) => QUERY_PREFIX + text)
+    : texts;
+  const result = await embedder(inputs.length === 1 ? inputs[0] : inputs, {
+    pooling: "cls",
     normalize: true,
   });
   process.stdout.write(JSON.stringify({ vectors: tensorToVectors(result, texts.length, dimensions) }));

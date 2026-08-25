@@ -35,6 +35,10 @@ class EmbeddingClient:
         self.embedding_model = model or DEFAULT_EMBEDDING_MODEL
         self.timeout = timeout
 
+    @property
+    def embedding_signature(self) -> str:
+        return f"openai:{self.base_url}:{self.embedding_model}"
+
     def embed(self, text: str, model: Optional[str] = None) -> list[float]:
         payload = {
             "model": model or self.embedding_model,
@@ -67,6 +71,10 @@ class EmbeddingClient:
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise EmbeddingClientError("embedding response did not include a vector") from exc
 
+    def embed_query(self, text: str, model: Optional[str] = None) -> list[float]:
+        """Embed a retrieval query; remote providers already separate query/document inputs."""
+        return self.embed(text, model=model)
+
 
 class LocalTransformersEmbeddingClient:
     """Local transformers.js embedding client using the GitNexus default model."""
@@ -85,15 +93,30 @@ class LocalTransformersEmbeddingClient:
         self.timeout = timeout
         self.helper_path = Path(__file__).with_name("local_embedding_helper.mjs")
 
+    @property
+    def embedding_signature(self) -> str:
+        return f"local:{self.embedding_model}:{self.dimensions}:cls-query-prefix-v1"
+
     def embed(self, text: str, model: Optional[str] = None) -> list[float]:
-        vectors = self.embed_many([text], model=model)
+        vectors = self.embed_many([text], model=model, query=False)
         return vectors[0] if vectors else []
 
-    def embed_many(self, texts: list[str], model: Optional[str] = None) -> list[list[float]]:
+    def embed_query(self, text: str, model: Optional[str] = None) -> list[float]:
+        vectors = self.embed_many([text], model=model, query=True)
+        return vectors[0] if vectors else []
+
+    def embed_many(
+        self,
+        texts: list[str],
+        model: Optional[str] = None,
+        *,
+        query: bool = False,
+    ) -> list[list[float]]:
         payload = {
             "texts": texts,
             "model": model or self.embedding_model,
             "dimensions": self.dimensions,
+            "query": query,
         }
         try:
             proc = subprocess.run(

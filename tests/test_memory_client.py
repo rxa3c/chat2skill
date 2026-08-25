@@ -226,12 +226,17 @@ class MemoryClientTests(unittest.TestCase):
                 node_path="/usr/bin/node",
             )
             vectors = client.embed_many(["one", "two"])
+            query_vector = client.embed_query("query")
 
         self.assertEqual(vectors, [[0.1, 0.2], [0.3, 0.4]])
+        self.assertEqual(query_vector, [0.1, 0.2])
         self.assertEqual(run.call_args.args[0][0], "/usr/bin/node")
-        body = json.loads(run.call_args.kwargs["input"])
-        self.assertEqual(body["model"], "Snowflake/snowflake-arctic-embed-xs")
-        self.assertEqual(body["dimensions"], 384)
+        document_body = json.loads(run.call_args_list[0].kwargs["input"])
+        query_body = json.loads(run.call_args_list[1].kwargs["input"])
+        self.assertEqual(document_body["model"], "Snowflake/snowflake-arctic-embed-xs")
+        self.assertEqual(document_body["dimensions"], 384)
+        self.assertFalse(document_body["query"])
+        self.assertTrue(query_body["query"])
 
     def test_memory_retriever_prefers_embedding_match(self):
         class FakeEmbedder:
@@ -266,6 +271,28 @@ class MemoryClientTests(unittest.TestCase):
         )
 
         self.assertEqual(retrieved[0].memory["id"], "right-semantic")
+
+    def test_memory_retriever_rejects_high_baseline_vector_without_text_evidence(self):
+        class FakeEmbedder:
+            def embed(self, text, model=None):
+                return [1.0, 0.0]
+
+        memories = [
+            {
+                "id": "baseline-only",
+                "content": "Unrelated deployment administration detail.",
+                "memory_type": "fact",
+                "section": "project",
+                "embedding": [0.66, 0.751265],
+            }
+        ]
+
+        retrieved = MemoryRetriever(embedding_client=FakeEmbedder()).retrieve(
+            "session markdown confirmed bug decisions",
+            memories,
+        )
+
+        self.assertEqual(retrieved, [])
 
     def test_context_memories_get_local_embeddings(self):
         class FakeEmbedder:
@@ -422,6 +449,62 @@ class MemoryClientTests(unittest.TestCase):
             self.assertIn("PendingAction 是独立子系统", result["rendered_text"])
             self.assertEqual(result["recall_synthesis"]["memories_included"], ["m1"])
 
+    def test_materialize_filters_unrelated_core_and_injects_project_skill(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context_dir = Path(tmp) / "contexts"
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
+
+            with patch("chat2skill.context_store.CONTEXTS_DIR", context_dir):
+                with patch.object(memory_client.storage, "DB_PATH", db_path):
+                    with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                        memory_client.storage.init_db()
+                        save_context(
+                            "/repo/project",
+                            "user-1",
+                            {
+                                "core_memory": "DeepSeek Harness package deployment details.\n"
+                                "Project bug fixes require a focused regression test.",
+                                "memories": [],
+                                "schemas": [],
+                                "recent_raw_hashes": [],
+                            },
+                        )
+                        memory_client.storage.save_project_skill(
+                            "user-1",
+                            "Always keep bug fixes focused and add a regression test.",
+                        )
+                        result = memory_client.materialize_for_prompt(
+                            _config(),
+                            "/repo/project",
+                            "需要修复一个 bug，确认测试方案",
+                            "user-1",
+                        )
+
+            self.assertIn("## Project Skill", result["rendered_text"])
+            self.assertIn("Always keep bug fixes focused", result["rendered_text"])
+            self.assertNotIn("DeepSeek Harness package deployment", result["rendered_text"])
+            self.assertEqual(result["skills"]["skills_included"], ["project-skill"])
+
+    def test_core_memory_rejects_embedding_baseline_without_lexical_evidence(self):
+        class FakeEmbedder:
+            def embed_query(self, text, model=None):
+                return [1.0, 0.0]
+
+            def embed_many(self, texts, model=None):
+                return [[0.66, 0.751265] for _ in texts]
+
+        selected = memory_client._relevant_core_memory(  # pylint: disable=protected-access
+            "DeepSeek Harness package deployment details.\n"
+            "Bug fixes require a regression test.",
+            "bug fixes regression test",
+            FakeEmbedder(),
+            "test-model",
+        )
+
+        self.assertIn("Bug fixes require a regression test.", selected)
+        self.assertNotIn("DeepSeek Harness package deployment", selected)
+
     def test_non_history_prompt_skips_recall_synthesis(self):
         with tempfile.TemporaryDirectory() as tmp:
             context_dir = Path(tmp) / "contexts"
@@ -532,7 +615,7 @@ class MemoryClientTests(unittest.TestCase):
                 self.assertIn("existing_skills", payload)
                 return {
                     "session_id": "session",
-                    "llm_used": False,
+                    "llm_used": True,
                     "memory": {
                         "delta_batch": {
                             "id": "delta-1",
@@ -566,8 +649,8 @@ class MemoryClientTests(unittest.TestCase):
                         "stage": "detector",
                         "reason_code": "detector_no_signal",
                         "diagnostics": {
-                            "llm_configured": False,
-                            "detector_mode": "keyword",
+                            "llm_configured": True,
+                            "detector_mode": "llm",
                         },
                     },
                 }
@@ -617,7 +700,7 @@ class MemoryClientTests(unittest.TestCase):
             self.assertEqual(result["skill_reason_code"], "detector_no_signal")
             self.assertEqual(
                 result["skill_diagnostics"]["detector_mode"],
-                "keyword",
+                "llm",
             )
             self.assertEqual(result["memory"]["memories_added"], 1)
             self.assertEqual(result["memory"]["context_path"], str(db_path))
@@ -644,6 +727,81 @@ class MemoryClientTests(unittest.TestCase):
             self.assertIn("remember EC2 deploy", activity_row[0])
             self.assertEqual(json.loads(activity_row[1])[0]["content"], "remember EC2 deploy")
             self.assertEqual(json.loads(activity_row[2]), ["b1"])
+
+    def test_commit_transcript_does_not_persist_fallback_response(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            context_dir = Path(tmp) / "contexts"
+            db_path = Path(tmp) / "c2s.db"
+            skill_dir = Path(tmp) / "skills"
+            transcript = Path(tmp) / "session.jsonl"
+            transcript.write_text(
+                "\n".join(
+                    [
+                        json.dumps({
+                            "type": "response_item",
+                            "payload": {"role": "user", "content": "remember unrelated fallback"},
+                        }),
+                        json.dumps({
+                            "type": "response_item",
+                            "payload": {"role": "assistant", "content": "done"},
+                        }),
+                    ]
+                ),
+                encoding="utf-8",
+            )
+            fallback_response = {
+                "llm_used": True,
+                "memory": {
+                    "delta_batch": {
+                        "operations": [{
+                            "op_type": "add_memory",
+                            "target_id": "fallback-memory",
+                            "content": "This must not be saved.",
+                        }],
+                    },
+                    "memories_added": 1,
+                    "reason": "keyword_fallback",
+                },
+                "skills": {
+                    "diagnostics": {
+                        "llm_configured": True,
+                        "analyzer_mode": "keyword_fallback",
+                    },
+                },
+            }
+
+            with patch("chat2skill.context_store.CONTEXTS_DIR", context_dir):
+                with patch.object(memory_client.storage, "DB_PATH", db_path):
+                    with patch.object(memory_client.storage, "SKILL_DIR", skill_dir):
+                        memory_client.storage.init_db()
+                        save_context(
+                            "/repo/project",
+                            "user-1",
+                            {
+                                "core_memory": "Existing core.",
+                                "memories": [],
+                                "schemas": [],
+                                "recent_raw_hashes": [],
+                            },
+                        )
+                        with patch.object(
+                            memory_client.api_client,
+                            "unified_learn",
+                            return_value=fallback_response,
+                        ):
+                            result = memory_client.commit_transcript(
+                                transcript, "user-1", _config(), project_dir="/repo/project"
+                            )
+                        context = load_context("/repo/project", "user-1")
+                        conn = sqlite3.connect(str(db_path))
+                        activity_count = conn.execute("SELECT COUNT(*) FROM memory_activity").fetchone()[0]
+                        conn.close()
+
+            self.assertEqual(result["status"], "skipped")
+            self.assertEqual(result["reason"], "llm_fallback_no_persist")
+            self.assertEqual(context["core_memory"], "Existing core.")
+            self.assertEqual(context["memories"], [])
+            self.assertEqual(activity_count, 0)
 
     def test_materialize_includes_similar_prior_tasks_from_activity_embeddings(self):
         class FakeEmbedder:

@@ -9,6 +9,7 @@ This adapter matches the stateless c2s-algorithm API:
 from __future__ import annotations
 
 import uuid
+import re
 from pathlib import Path
 from typing import Any
 
@@ -26,6 +27,7 @@ from .embedding_client import EmbeddingClient, LocalTransformersEmbeddingClient
 from .models import Skill, UserModel
 from .recall_policy import should_synthesize_recall
 from .retrieval import MemoryRetriever, SkillRetriever
+from . import similarity
 from .transcripts import parse_transcript
 
 
@@ -37,7 +39,7 @@ DEFAULT_TOKEN_BUDGET = 4000
 DEFAULT_MEMORY_RATIO = 0.6
 DEFAULT_PROMPT_MEMORY_TOP_K = 12
 DEFAULT_PROMPT_SKILL_TOP_K = 6
-DEFAULT_PROMPT_MEMORY_MIN_SCORE = 0.3
+DEFAULT_PROMPT_MEMORY_MIN_SCORE = 0.15
 DEFAULT_PROMPT_SKILL_MIN_SCORE = 0.2
 DEFAULT_RECALL_SYNTHESIS_MEMORY_TOP_K = 32
 DEFAULT_RECALL_SYNTHESIS_SKILL_TOP_K = 8
@@ -50,6 +52,10 @@ DEFAULT_LEARN_TOTAL_CHAR_LIMIT = 90000
 SKILL_CONTENT_CHAR_LIMIT = 2400
 MEMORY_CONTENT_CHAR_LIMIT = 1200
 CORE_MEMORY_CHAR_LIMIT = 5000
+CORE_MEMORY_CHUNK_CHAR_LIMIT = 800
+CORE_MEMORY_VECTOR_MIN_SCORE = 0.70
+CORE_MEMORY_LEXICAL_MIN_SCORE = 0.12
+PROJECT_SKILL_TOKEN_BUDGET = 1600
 DEFAULT_WORKED_EXAMPLE_TOP_K = 2
 DEFAULT_WORKED_EXAMPLE_MIN_SCORE = 0.82
 DEFAULT_WORKED_EXAMPLE_BACKFILL_LIMIT = 50
@@ -74,10 +80,12 @@ def materialize_for_prompt(
     storage.init_db()
     context = load_context(project_dir, user_id)
     skills = storage.load_skills(user_id, include_pending=False)
+    project_skill_text = _load_project_skill_text(user_id)
 
     options = _memory_options(config)
     embedding_client = _build_embedding_client(config)
     embedding_model = _embedding_model(config)
+    _refresh_skill_embeddings(skills, user_id, embedding_client, embedding_model)
     _embed_context_memories(context, embedding_client, embedding_model)
     _backfill_activity_inputs_for_examples(
         user_id=user_id,
@@ -86,6 +94,7 @@ def materialize_for_prompt(
         embedding_model=embedding_model,
         options=options,
     )
+    query_embedding = _embed_query_text(prompt, embedding_client, embedding_model)
     retrieved_memories = MemoryRetriever(
         embedding_client=embedding_client,
         embedding_model=embedding_model,
@@ -95,6 +104,7 @@ def materialize_for_prompt(
         top_k=options["prompt_memory_top_k"],
         active_only=True,
         min_score=options["prompt_memory_min_score"],
+        query_vector=query_embedding,
     )
     retrieved_skills = SkillRetriever(
         embedding_client=embedding_client,
@@ -105,8 +115,8 @@ def materialize_for_prompt(
         top_k=options["skill_top_k"],
         active_only=True,
         min_score=options["prompt_skill_min_score"],
+        query_vector=query_embedding,
     )
-    query_embedding = _embed_text(prompt, embedding_client, embedding_model)
     worked_examples = _worked_examples_for_prompt(
         user_id=user_id,
         project_dir=project_dir,
@@ -116,8 +126,16 @@ def materialize_for_prompt(
 
     result = _build_local_materialization(
         context=context,
+        core_memory_text=_relevant_core_memory(
+            str(context.get("core_memory") or ""),
+            prompt,
+            embedding_client,
+            embedding_model,
+            query_embedding=query_embedding,
+        ),
         retrieved_memories=retrieved_memories,
         retrieved_skills=retrieved_skills,
+        project_skill_text=project_skill_text,
         worked_examples=worked_examples,
         token_budget=options["token_budget"],
         memory_ratio=options["memory_ratio"],
@@ -158,6 +176,14 @@ def commit_transcript(
     options = _memory_options(config)
     embedding_client = _build_embedding_client(config)
     embedding_model = _embedding_model(config)
+    _embed_context_memories(context, embedding_client, embedding_model)
+    existing_skills_loaded = storage.load_skills(user_id, include_pending=False)
+    _refresh_skill_embeddings(
+        existing_skills_loaded,
+        user_id,
+        embedding_client,
+        embedding_model,
+    )
     task_text = _messages_text(messages)
     existing_memory = _context_state_for_learn(context, task_text, options, embedding_client, embedding_model)
     existing_skills = _skills_for_learn(user_id, task_text, options, embedding_client, embedding_model)
@@ -179,6 +205,10 @@ def commit_transcript(
     except api_client.ApiError as exc:
         raise MemoryClientError(str(exc)) from None
 
+    fallback_reason = _learn_fallback_reason(response)
+    if fallback_reason:
+        return _skipped_learn_result(response, fallback_reason)
+
     memory = response.get("memory") or {}
     apply_memory_result(context, memory)
     _embed_context_memories(context, embedding_client, embedding_model)
@@ -191,6 +221,7 @@ def commit_transcript(
         raw_input=task_text,
         raw_messages=messages,
         input_embedding=raw_input_embedding,
+        input_embedding_model=_embedding_signature(embedding_client, embedding_model),
         memory_ids_produced=_produced_memory_ids(memory),
     )
 
@@ -239,6 +270,7 @@ def re_extract_project_memory(
     profile = storage.load_user_profile(user_id)
     previews = []
     applied = 0
+    skipped = 0
 
     for activity in reversed(activities):
         messages = activity.get("raw_messages") or []
@@ -286,6 +318,12 @@ def re_extract_project_memory(
             response = api_client.unified_learn(config["api_url"], payload)
         except api_client.ApiError as exc:
             raise MemoryClientError(str(exc)) from None
+        fallback_reason = _learn_fallback_reason(response)
+        if fallback_reason:
+            skipped += 1
+            previews[-1]["apply_status"] = "skipped"
+            previews[-1]["reason"] = fallback_reason
+            continue
         memory = response.get("memory") or {}
         apply_memory_result(context, memory)
         _embed_context_memories(context, embedding_client, embedding_model)
@@ -298,7 +336,53 @@ def re_extract_project_memory(
         "status": "preview" if dry_run else "applied",
         "activities_found": len(activities),
         "activities_applied": applied,
+        "activities_skipped": skipped,
         "activities": previews,
+    }
+
+
+def _learn_fallback_reason(response: dict[str, Any]) -> str:
+    if not isinstance(response, dict):
+        return "invalid_learn_response_no_persist"
+    if response.get("llm_used") is not True:
+        return "llm_unavailable_no_persist"
+
+    memory = response.get("memory") or {}
+    skills = response.get("skills") or {}
+    diagnostics = skills.get("diagnostics") or {}
+    if memory.get("reason") == "llm_unavailable_no_persist":
+        return "llm_unavailable_no_persist"
+    if skills.get("reason_code") == "llm_unavailable_no_persist":
+        return "llm_unavailable_no_persist"
+    if diagnostics.get("provider_error"):
+        return "llm_provider_error_no_persist"
+    if diagnostics.get("judge_status") == "api_failed":
+        return "llm_provider_error_no_persist"
+    if any(
+        diagnostics.get(key) in {"keyword_fallback", "template_fallback"}
+        for key in ("detector_mode", "analyzer_mode", "generator_mode")
+    ):
+        return "llm_fallback_no_persist"
+    notes = [str(note).lower() for note in diagnostics.get("quality_notes") or []]
+    if any("fallback" in note or "api_failed" in note for note in notes):
+        return "llm_fallback_no_persist"
+    return ""
+
+
+def _skipped_learn_result(response: dict[str, Any], reason: str) -> dict[str, Any]:
+    skills = response.get("skills") if isinstance(response, dict) else {}
+    diagnostics = (skills or {}).get("diagnostics") if isinstance(skills, dict) else {}
+    return {
+        "status": "skipped",
+        "mode": "unified",
+        "reason": reason,
+        "memory": {"memories_added": 0, "memories_updated": 0, "memories_removed": 0},
+        "skill": None,
+        "skill_status": "skipped",
+        "skill_stage": (skills or {}).get("stage") if isinstance(skills, dict) else None,
+        "skill_reason_code": reason,
+        "skill_diagnostics": diagnostics or {},
+        "llm_used": response.get("llm_used") if isinstance(response, dict) else None,
     }
 
 
@@ -425,7 +509,12 @@ def _embed_context_memories(
         not hasattr(embedding_client, "embed") and not hasattr(embedding_client, "embed_many")
     ):
         return
-    memories = [item for item in context.get("memories") or [] if not item.get("embedding")]
+    signature = _embedding_signature(embedding_client, embedding_model)
+    memories = [
+        item
+        for item in context.get("memories") or []
+        if not item.get("embedding") or item.get("embedding_model") != signature
+    ]
     if not memories:
         return
     for start in range(0, len(memories), EMBED_MEMORY_BATCH_SIZE):
@@ -451,6 +540,48 @@ def _embed_context_memories(
             continue
         for item, vector in zip(batch, vectors):
             item["embedding"] = vector
+            item["embedding_model"] = signature
+
+
+def _refresh_skill_embeddings(
+    skills: list[Skill],
+    user_id: str,
+    embedding_client,
+    embedding_model: str | None,
+) -> None:
+    if not embedding_client or not hasattr(embedding_client, "embed"):
+        return
+    signature = _embedding_signature(embedding_client, embedding_model)
+    stale_skills = []
+    for skill in skills:
+        if not skill.embedding_text:
+            skill.refresh_embedding_text()
+        if skill.embedding_vector and skill.embedding_model == signature:
+            continue
+        stale_skills.append(skill)
+    if not stale_skills:
+        return
+    try:
+        if hasattr(embedding_client, "embed_many"):
+            vectors = embedding_client.embed_many(
+                [skill.embedding_text for skill in stale_skills],
+                model=embedding_model,
+            )
+        else:
+            vectors = [
+                embedding_client.embed(skill.embedding_text, model=embedding_model)
+                for skill in stale_skills
+            ]
+    except Exception:
+        return
+    update = getattr(storage, "update_skill_embedding", None)
+    for skill, vector in zip(stale_skills, vectors):
+        if not vector:
+            continue
+        skill.embedding_vector = vector
+        skill.embedding_model = signature
+        if callable(update):
+            update(user_id, skill.name, vector, signature)
 
 
 def _embed_text(text: str, embedding_client, embedding_model: str | None) -> list[float]:
@@ -460,6 +591,99 @@ def _embed_text(text: str, embedding_client, embedding_model: str | None) -> lis
         return embedding_client.embed(text, model=embedding_model)
     except Exception:
         return []
+
+
+def _embed_query_text(text: str, embedding_client, embedding_model: str | None) -> list[float]:
+    if not embedding_client:
+        return []
+    embed_query = getattr(embedding_client, "embed_query", None)
+    if not callable(embed_query):
+        return _embed_text(text, embedding_client, embedding_model)
+    try:
+        return embed_query(text, model=embedding_model)
+    except Exception:
+        return []
+
+
+def _embedding_signature(embedding_client, embedding_model: str | None) -> str:
+    if not embedding_client:
+        return ""
+    signature = getattr(embedding_client, "embedding_signature", None)
+    if signature:
+        return str(signature)
+    return f"{type(embedding_client).__module__}.{type(embedding_client).__qualname__}:{embedding_model or ''}"
+
+
+def _load_project_skill_text(user_id: str) -> str:
+    project_skill = storage.load_project_skill(user_id)
+    if not project_skill:
+        return ""
+    return str(project_skill.get("content") or "").strip()
+
+
+def _relevant_core_memory(
+    core_memory: str,
+    prompt: str,
+    embedding_client,
+    embedding_model: str | None,
+    query_embedding: list[float] | None = None,
+) -> str:
+    chunks = _core_memory_chunks(core_memory)
+    if not chunks:
+        return ""
+
+    query_tokens = SkillRetriever._tokens(prompt)
+    query_specific = query_tokens - _CORE_GENERIC_TOKENS
+    query_embedding = query_embedding or _embed_query_text(prompt, embedding_client, embedding_model)
+    vectors: list[list[float]] = []
+    if query_embedding and embedding_client:
+        try:
+            if hasattr(embedding_client, "embed_many"):
+                vectors = embedding_client.embed_many(chunks, model=embedding_model)
+            else:
+                vectors = [embedding_client.embed(chunk, model=embedding_model) for chunk in chunks]
+        except Exception:
+            vectors = []
+
+    ranked = []
+    for index, chunk in enumerate(chunks):
+        chunk_tokens = SkillRetriever._tokens(chunk)
+        shared_specific = query_specific & (chunk_tokens - _CORE_GENERIC_TOKENS)
+        lexical = similarity.jaccard(query_specific, chunk_tokens - _CORE_GENERIC_TOKENS)
+        vector = similarity.cosine(query_embedding, vectors[index]) if index < len(vectors) else 0.0
+        if vector >= CORE_MEMORY_VECTOR_MIN_SCORE or (
+            shared_specific and lexical >= CORE_MEMORY_LEXICAL_MIN_SCORE
+        ):
+            ranked.append((max(vector, lexical), index, chunk))
+
+    ranked.sort(key=lambda item: (item[0], -item[1]), reverse=True)
+    return "\n".join(item[2] for item in ranked[:8]).strip()
+
+
+def _core_memory_chunks(text: str) -> list[str]:
+    fragments = [
+        part.strip()
+        for part in re.split(r"\n+|(?<=[。！？.!?])\s+", text or "")
+        if part.strip()
+    ]
+    chunks: list[str] = []
+    for fragment in fragments:
+        if len(fragment) > CORE_MEMORY_CHUNK_CHAR_LIMIT:
+            chunks.extend(
+                fragment[index : index + CORE_MEMORY_CHUNK_CHAR_LIMIT]
+                for index in range(0, len(fragment), CORE_MEMORY_CHUNK_CHAR_LIMIT)
+            )
+            continue
+        chunks.append(fragment)
+    return chunks
+
+
+_CORE_GENERIC_TOKENS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "has", "have",
+    "in", "is", "it", "of", "on", "or", "project", "system", "that", "the", "this",
+    "to", "use", "uses", "with", "当前", "项目", "系统", "内容", "记忆", "本地", "对话",
+    "问题", "这个", "可以", "需要", "已经", "我们", "相关", "规则", "插件",
+}
 
 
 def _produced_memory_ids(memory: dict[str, Any]) -> list[str]:
@@ -519,6 +743,7 @@ def _backfill_activity_inputs_for_examples(
 ) -> None:
     if not embedding_client or not hasattr(embedding_client, "embed"):
         return
+    signature = _embedding_signature(embedding_client, embedding_model)
     activities = storage.load_memory_activities(
         user_id,
         context_key(project_dir),
@@ -526,7 +751,11 @@ def _backfill_activity_inputs_for_examples(
         with_raw_input=False,
     )
     for activity in activities:
-        if activity.get("raw_input") and activity.get("input_embedding"):
+        if (
+            activity.get("raw_input")
+            and activity.get("input_embedding")
+            and activity.get("input_embedding_model") == signature
+        ):
             continue
         session_id = activity.get("session_id") or ""
         if not session_id:
@@ -547,6 +776,7 @@ def _backfill_activity_inputs_for_examples(
             raw_input=raw_input,
             raw_messages=messages,
             input_embedding=vector,
+            input_embedding_model=signature,
         )
 
 
@@ -565,6 +795,7 @@ def _recall_synthesis_for_prompt(
 
     embedding_client = _build_embedding_client(config)
     embedding_model = _embedding_model(config)
+    query_embedding = _embed_query_text(prompt, embedding_client, embedding_model)
     retrieved_memories = MemoryRetriever(
         embedding_client=embedding_client,
         embedding_model=embedding_model,
@@ -573,6 +804,8 @@ def _recall_synthesis_for_prompt(
         context.get("memories") or [],
         top_k=options["recall_synthesis_memory_top_k"],
         active_only=True,
+        min_score=options["prompt_memory_min_score"],
+        query_vector=query_embedding,
     )
     retrieved_skills = SkillRetriever(
         embedding_client=embedding_client,
@@ -582,12 +815,23 @@ def _recall_synthesis_for_prompt(
         skills,
         top_k=options["recall_synthesis_skill_top_k"],
         active_only=True,
+        min_score=options["prompt_skill_min_score"],
+        query_vector=query_embedding,
     )
     payload = {
         "user_id": user_id,
         "query": prompt,
         "existing_memory": {
-            "core_memory": _cap_chars(str(context.get("core_memory") or ""), CORE_MEMORY_CHAR_LIMIT),
+            "core_memory": _cap_chars(
+                _relevant_core_memory(
+                    str(context.get("core_memory") or ""),
+                    prompt,
+                    embedding_client,
+                    embedding_model,
+                    query_embedding=query_embedding,
+                ),
+                CORE_MEMORY_CHAR_LIMIT,
+            ),
             "memories": [_memory_payload_for_learn(item.memory) for item in retrieved_memories],
             "schemas": _schemas_for_memories(
                 context.get("schemas") or [],
@@ -646,15 +890,17 @@ def _prepend_recall_synthesis(result: dict[str, Any], synthesis: dict[str, Any])
 def _build_local_materialization(
     *,
     context: dict[str, Any],
+    core_memory_text: str,
     retrieved_memories: list,
     retrieved_skills: list,
+    project_skill_text: str,
     worked_examples: list[dict[str, Any]],
     token_budget: int,
     memory_ratio: float,
 ) -> dict[str, Any]:
     memory_budget = int(token_budget * memory_ratio)
     skill_budget = max(200, token_budget - memory_budget)
-    core_memory = str(context.get("core_memory") or "").strip()
+    core_memory = core_memory_text.strip()
     memory_text = MemoryRetriever().format_for_prompt(retrieved_memories)
     worked_examples_text = _format_worked_examples_for_prompt(worked_examples)
     skills_text = _format_skills_for_prompt(retrieved_skills)
@@ -670,11 +916,30 @@ def _build_local_materialization(
     if worked_examples_text:
         memory_parts.append("## Similar Prior Tasks\n" + _cap_text(worked_examples_text, memory_budget // 4))
 
+    memory_rendered = _cap_text("\n\n".join(memory_parts), memory_budget)
     prompt_parts = []
-    if memory_parts:
-        prompt_parts.append("\n\n".join(memory_parts))
+    if memory_rendered:
+        prompt_parts.append(memory_rendered)
+    project_skill_included = False
+    project_skill_rendered = ""
+    retrieved_skills_included = False
+    if project_skill_text:
+        project_skill_rendered = "## Project Skill\n" + _cap_text(
+            project_skill_text,
+            min(PROJECT_SKILL_TOKEN_BUDGET, skill_budget),
+        )
+        prompt_parts.append(project_skill_rendered)
+        project_skill_included = True
     if skills_text:
-        prompt_parts.append("## Relevant Project Skills\n" + _cap_text(skills_text, skill_budget))
+        remaining_skill_budget = max(
+            0,
+            skill_budget - _estimate_tokens(project_skill_rendered),
+        )
+        if remaining_skill_budget:
+            prompt_parts.append(
+                "## Relevant Project Skills\n" + _cap_text(skills_text, remaining_skill_budget)
+            )
+            retrieved_skills_included = True
 
     rendered = "\n\n".join(part for part in prompt_parts if part.strip())
     rendered = _cap_text(rendered, token_budget)
@@ -685,7 +950,7 @@ def _build_local_materialization(
         "token_count": _estimate_tokens(rendered),
         "materialization_id": materialization_id,
         "memory": {
-            "rendered_text": "\n\n".join(memory_parts),
+            "rendered_text": memory_rendered,
             "memories_included": [
                 str(item.memory.get("id"))
                 for item in retrieved_memories
@@ -697,12 +962,13 @@ def _build_local_materialization(
                 if example.get("activity_id")
             ],
             "schemas_included": [],
-            "token_count": _estimate_tokens("\n\n".join(memory_parts)),
+            "token_count": _estimate_tokens(memory_rendered),
             "coverage_score": 1.0 if rendered else 0.0,
         },
         "skills": {
-            "skills_included": [item.skill.name for item in retrieved_skills],
-            "token_count": _estimate_tokens(skills_text),
+            "skills_included": (["project-skill"] if project_skill_included else [])
+            + ([item.skill.name for item in retrieved_skills] if retrieved_skills_included else []),
+            "token_count": _estimate_tokens("\n\n".join(prompt_parts[1:] if memory_rendered else prompt_parts)),
         },
     }
 
@@ -723,6 +989,7 @@ def _context_state_for_learn(
         state.get("memories") or [],
         top_k=options["learn_memory_top_k"],
         active_only=True,
+        min_score=options["prompt_memory_min_score"],
     )
     state["core_memory"] = _cap_chars(str(state.get("core_memory") or ""), CORE_MEMORY_CHAR_LIMIT)
     state["memories"] = [_memory_payload_for_learn(item.memory) for item in retrieved]
@@ -758,6 +1025,7 @@ def _skills_for_learn(
         skills,
         top_k=options["learn_skill_top_k"],
         active_only=True,
+        min_score=options["prompt_skill_min_score"],
     )
     return [item.skill for item in retrieved]
 

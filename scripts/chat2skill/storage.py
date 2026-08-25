@@ -223,6 +223,7 @@ def _initialize_db():
             salience REAL,
             confidence REAL,
             embedding TEXT,
+            embedding_model TEXT,
             source_session TEXT,
             source_agent TEXT,
             recall_count INTEGER,
@@ -235,6 +236,7 @@ def _initialize_db():
             PRIMARY KEY (user_id, context_key, id)
         )
     """)
+    _ensure_column(c, "memory_items", "embedding_model", "TEXT")
     c.execute("""
         CREATE TABLE IF NOT EXISTS memory_schemas (
             user_id TEXT NOT NULL,
@@ -280,6 +282,7 @@ def _initialize_db():
             raw_input TEXT,
             raw_messages TEXT,
             input_embedding TEXT,
+            input_embedding_model TEXT,
             memory_ids_produced TEXT,
             feedback TEXT,
             materialization_id TEXT,
@@ -290,6 +293,7 @@ def _initialize_db():
     _ensure_column(c, "memory_activity", "raw_input", "TEXT")
     _ensure_column(c, "memory_activity", "raw_messages", "TEXT")
     _ensure_column(c, "memory_activity", "input_embedding", "TEXT")
+    _ensure_column(c, "memory_activity", "input_embedding_model", "TEXT")
     _ensure_column(c, "memory_activity", "memory_ids_produced", "TEXT")
     _ensure_column(c, "memory_activity", "feedback", "TEXT")
     _ensure_column(c, "memory_activity", "materialization_id", "TEXT")
@@ -667,8 +671,12 @@ def save_skill(skill: Skill, user_id: str = "default", embedding_client=None):
             skill.embedding_vector = embedding_client.embed(skill.embedding_text)
             skill.embedding_model = getattr(
                 embedding_client,
-                "embedding_model",
-                skill.embedding_model or "text-embedding-3-small",
+                "embedding_signature",
+                getattr(
+                    embedding_client,
+                    "embedding_model",
+                    skill.embedding_model or "text-embedding-3-small",
+                ),
             )
         except Exception as e:
             skill.quality_notes.append(f"embedding_failed:{type(e).__name__}")
@@ -745,6 +753,27 @@ def save_skill(skill: Skill, user_id: str = "default", embedding_client=None):
 
     if skill.memory_items:
         _save_memory_dicts(skill.memory_items, user_id=user_id, skill_name=skill.name)
+
+
+def update_skill_embedding(user_id: str, skill_name: str, vector: list[float], embedding_model: str) -> None:
+    """Persist a refreshed retrieval vector without changing skill metadata."""
+    conn = connect_db()
+    conn.execute(
+        """
+        UPDATE skill_records
+        SET embedding_vector = ?, embedding_model = ?, updated_at = ?
+        WHERE user_id = ? AND name = ?
+        """,
+        (
+            json.dumps(vector or [], ensure_ascii=False),
+            embedding_model,
+            datetime.now().isoformat(),
+            user_id,
+            skill_name,
+        ),
+    )
+    conn.commit()
+    conn.close()
 
 
 def _find_merge_target(candidate: Skill, existing_skills: List[Skill]) -> Optional[Skill]:
@@ -1139,7 +1168,7 @@ def load_project_memory_context(user_id: str, context_key: str) -> Optional[dict
 
     item_rows = c.execute(
         """
-        SELECT id, content, memory_type, section, salience, confidence, embedding,
+        SELECT id, content, memory_type, section, salience, confidence, embedding, embedding_model,
                source_session, source_agent, recall_count, hit_count, miss_count,
                is_active, is_archived, created_at, updated_at
         FROM memory_items
@@ -1214,9 +1243,9 @@ def save_project_memory_context(user_id: str, context_key: str, context: dict):
         """
         INSERT INTO memory_items
         (user_id, context_key, id, content, memory_type, section, salience, confidence,
-         embedding, source_session, source_agent, recall_count, hit_count, miss_count,
+         embedding, embedding_model, source_session, source_agent, recall_count, hit_count, miss_count,
          is_active, is_archived, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             _memory_item_to_row(user_id, context_key, item, now)
@@ -1299,6 +1328,7 @@ def record_project_memory_activity(
     raw_input: str = "",
     raw_messages: Optional[list[dict]] = None,
     input_embedding: Optional[list[float]] = None,
+    input_embedding_model: Optional[str] = None,
     memory_ids_produced: Optional[list[str]] = None,
     feedback: Optional[dict] = None,
     materialization_id: Optional[str] = None,
@@ -1316,9 +1346,9 @@ def record_project_memory_activity(
         """
         INSERT INTO memory_activity
         (user_id, context_key, session_id, raw_input_hash, raw_input, raw_messages,
-         input_embedding, memory_ids_produced, feedback, materialization_id,
+         input_embedding, input_embedding_model, memory_ids_produced, feedback, materialization_id,
          delta_batch, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             user_id,
@@ -1328,6 +1358,7 @@ def record_project_memory_activity(
             raw_input,
             json.dumps(raw_messages or [], ensure_ascii=False),
             json.dumps(input_embedding or [], ensure_ascii=False),
+            input_embedding_model,
             json.dumps(memory_ids_produced or [], ensure_ascii=False),
             json.dumps(feedback or {}, ensure_ascii=False) if feedback else None,
             materialization_id,
@@ -1430,7 +1461,7 @@ def load_memory_activities(
     rows = conn.execute(
         f"""
         SELECT id, user_id, context_key, session_id, raw_input_hash, raw_input,
-               raw_messages, input_embedding, memory_ids_produced, feedback,
+               raw_messages, input_embedding, input_embedding_model, memory_ids_produced, feedback,
                materialization_id, delta_batch, created_at
         FROM memory_activity
         {where}
@@ -1449,6 +1480,7 @@ def update_memory_activity_input(
     raw_input: str,
     raw_messages: list[dict],
     input_embedding: list[float],
+    input_embedding_model: Optional[str] = None,
 ) -> None:
     conn = connect_db()
     conn.execute(
@@ -1456,13 +1488,15 @@ def update_memory_activity_input(
         UPDATE memory_activity
         SET raw_input = ?,
             raw_messages = ?,
-            input_embedding = ?
+            input_embedding = ?,
+            input_embedding_model = ?
         WHERE id = ?
         """,
         (
             raw_input,
             json.dumps(raw_messages or [], ensure_ascii=False),
             json.dumps(input_embedding or [], ensure_ascii=False),
+            input_embedding_model,
             int(activity_id),
         ),
     )
@@ -1507,7 +1541,7 @@ def load_project_memories_by_ids(user_id: str, context_key: str, memory_ids: lis
     conn = connect_db()
     rows = conn.execute(
         f"""
-        SELECT id, content, memory_type, section, salience, confidence, embedding,
+        SELECT id, content, memory_type, section, salience, confidence, embedding, embedding_model,
                source_session, source_agent, recall_count, hit_count, miss_count,
                is_active, is_archived, created_at, updated_at
         FROM memory_items
@@ -1682,6 +1716,7 @@ def _memory_item_to_row(user_id: str, context_key: str, item: dict, now: str) ->
         float(item.get("salience") or 0.5),
         float(item.get("confidence") or 0.5),
         json.dumps(item.get("embedding") or [], ensure_ascii=False),
+        _sqlite_text(item.get("embedding_model")),
         _sqlite_text(item.get("source_session")),
         _sqlite_text(item.get("source_agent")),
         int(item.get("recall_count") or 0),
@@ -1714,15 +1749,16 @@ def _memory_item_from_row(row) -> dict:
         "salience": row[4] if row[4] is not None else 0.5,
         "confidence": row[5] if row[5] is not None else 0.5,
         "embedding": _json_list(row[6]),
-        "source_session": row[7],
-        "source_agent": row[8],
-        "recall_count": row[9] or 0,
-        "hit_count": row[10] or 0,
-        "miss_count": row[11] or 0,
-        "is_active": bool(row[12]),
-        "is_archived": bool(row[13]),
-        "created_at": row[14],
-        "updated_at": row[15],
+        "embedding_model": row[7] or "",
+        "source_session": row[8],
+        "source_agent": row[9],
+        "recall_count": row[10] or 0,
+        "hit_count": row[11] or 0,
+        "miss_count": row[12] or 0,
+        "is_active": bool(row[13]),
+        "is_archived": bool(row[14]),
+        "created_at": row[15],
+        "updated_at": row[16],
     }
 
 
@@ -1763,6 +1799,7 @@ def _memory_activity_from_row(row) -> dict:
         "raw_input": row["raw_input"] or "",
         "raw_messages": _json_list(row["raw_messages"]),
         "input_embedding": _json_list(row["input_embedding"]),
+        "input_embedding_model": row["input_embedding_model"] or "",
         "memory_ids_produced": _json_list(row["memory_ids_produced"]),
         "feedback": _json_dict(row["feedback"]),
         "materialization_id": row["materialization_id"] or "",

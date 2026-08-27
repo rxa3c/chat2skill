@@ -26,7 +26,7 @@ from .context_store import (
 from .embedding_client import EmbeddingClient, LocalTransformersEmbeddingClient
 from .models import Skill, UserModel
 from .recall_policy import should_synthesize_recall
-from .retrieval import MemoryRetriever, SkillRetriever
+from .retrieval import MemoryRetriever, SkillRetriever, vector_relevances
 from . import similarity
 from .transcripts import parse_transcript
 
@@ -53,6 +53,10 @@ SKILL_CONTENT_CHAR_LIMIT = 2400
 MEMORY_CONTENT_CHAR_LIMIT = 1200
 CORE_MEMORY_CHAR_LIMIT = 5000
 CORE_MEMORY_CHUNK_CHAR_LIMIT = 800
+# Core memory is one durable summary chunk per project (measured: 1 chunk),
+# a population too small for a relative score. It keeps its original absolute
+# floor; the z-score path engages on its own once a project's core memory grows
+# past similarity.MIN_RELATIVE_POPULATION chunks.
 CORE_MEMORY_VECTOR_MIN_SCORE = 0.70
 CORE_MEMORY_LEXICAL_MIN_SCORE = 0.12
 PROJECT_SKILL_TOKEN_BUDGET = 1600
@@ -645,15 +649,23 @@ def _relevant_core_memory(
         except Exception:
             vectors = []
 
+    relevances = vector_relevances(
+        [
+            similarity.cosine(query_embedding, vectors[index])
+            if index < len(vectors) and query_embedding
+            else None
+            for index in range(len(chunks))
+        ],
+        CORE_MEMORY_VECTOR_MIN_SCORE,
+    )
+
     ranked = []
     for index, chunk in enumerate(chunks):
         chunk_tokens = SkillRetriever._tokens(chunk)
         shared_specific = query_specific & (chunk_tokens - _CORE_GENERIC_TOKENS)
         lexical = similarity.jaccard(query_specific, chunk_tokens - _CORE_GENERIC_TOKENS)
-        vector = similarity.cosine(query_embedding, vectors[index]) if index < len(vectors) else 0.0
-        if vector >= CORE_MEMORY_VECTOR_MIN_SCORE or (
-            shared_specific and lexical >= CORE_MEMORY_LEXICAL_MIN_SCORE
-        ):
+        vector = relevances[index]
+        if vector > 0 or (shared_specific and lexical >= CORE_MEMORY_LEXICAL_MIN_SCORE):
             ranked.append((max(vector, lexical), index, chunk))
 
     ranked.sort(key=lambda item: (item[0], -item[1]), reverse=True)

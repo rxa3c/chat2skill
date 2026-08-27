@@ -10,10 +10,17 @@ from __future__ import annotations
 
 import math
 import re
-from typing import List
+from typing import List, Optional
 
 MERGE_COSINE_THRESHOLD = 0.86
 MERGE_LEXICAL_THRESHOLD = 0.62
+
+# Cosine values from the local embedding model sit in a narrow absolute band
+# (measured 0.45-0.72 on this corpus), so relevance is a per-query margin over
+# that query's own score distribution, not an absolute cut. A z-score needs a
+# population large enough to have a meaningful spread; below that the caller
+# falls back to an absolute floor.
+MIN_RELATIVE_POPULATION = 24
 
 
 def tokens(text: str) -> set[str]:
@@ -33,6 +40,22 @@ def jaccard(left: set, right: set) -> float:
     if not left or not right:
         return 0.0
     return len(left & right) / len(left | right)
+
+
+def relative_scores(values: List[float]) -> Optional[List[float]]:
+    """Return per-query z-scores, or None when the population is too small.
+
+    Relevance for one query is how far a candidate sits above that query's own
+    mean, measured in standard deviations. Returning None tells the caller the
+    sample cannot support a relative decision.
+    """
+    if len(values) < MIN_RELATIVE_POPULATION:
+        return None
+    mean = sum(values) / len(values)
+    deviation = math.sqrt(sum((value - mean) ** 2 for value in values) / len(values))
+    if deviation <= 0:
+        return None
+    return [(value - mean) / deviation for value in values]
 
 
 def cosine(left: List[float], right: List[float]) -> float:

@@ -15,8 +15,46 @@ from .models import Skill
 from .i18n import LANGUAGES
 
 
-VECTOR_EVIDENCE_SCORE = 0.70
-LEXICAL_EVIDENCE_SCORE = 0.12
+# Relevance is decided per query, not on an absolute cosine cut. VECTOR_Z_FLOOR
+# is the margin (in standard deviations above the query's own mean) a candidate
+# must clear; measured on a 1972-memory corpus it separates on-topic prompts
+# (mean recall 8.8/12) from off-topic ones (mean recall 0.7/12).
+VECTOR_Z_FLOOR = 2.5
+VECTOR_Z_SPAN = 2.5
+VECTOR_SCORE_BASE = 0.5
+# Fallback for populations too small for a z-score (see similarity.MIN_RELATIVE_POPULATION).
+ABSOLUTE_VECTOR_FLOOR = 0.55
+
+
+def _vector_relevance(z_score: float) -> float:
+    """Map a per-query z-score onto a 0..1 relevance, or 0 below the floor."""
+    if z_score < VECTOR_Z_FLOOR:
+        return 0.0
+    headroom = min(1.0, (z_score - VECTOR_Z_FLOOR) / VECTOR_Z_SPAN)
+    return VECTOR_SCORE_BASE + (1.0 - VECTOR_SCORE_BASE) * headroom
+
+
+def vector_relevances(
+    cosines: List[Optional[float]],
+    absolute_floor: float = ABSOLUTE_VECTOR_FLOOR,
+) -> List[float]:
+    """Convert raw cosines into relevance scores using per-query z-scores.
+
+    Falls back to an absolute floor when the population is too small for a
+    z-score to mean anything (few skills, a new project with few memories).
+    """
+    population = [value for value in cosines if value is not None]
+    z_scores = similarity.relative_scores(population)
+    if z_scores is None:
+        return [
+            value if value is not None and value >= absolute_floor else 0.0
+            for value in cosines
+        ]
+    by_index = iter(z_scores)
+    return [
+        _vector_relevance(next(by_index)) if value is not None else 0.0
+        for value in cosines
+    ]
 
 
 @dataclass
@@ -47,7 +85,7 @@ class SkillRetriever:
         self,
         embedding_client=None,
         embedding_model: Optional[str] = None,
-        min_vector_score: float = 0.55,
+        min_vector_score: float = ABSOLUTE_VECTOR_FLOOR,
     ):
         self.embedding_client = embedding_client
         self.embedding_model = embedding_model
@@ -68,11 +106,26 @@ class SkillRetriever:
         candidates: List[RetrievedSkill] = []
         type_counts: dict[str, int] = {}
 
-        for skill in skills:
-            if active_only and skill.status != "active":
-                continue
-            text = skill.embedding_text or f"{skill.name}\n{skill.description}\n{skill.content[:1000]}"
-            score = self._score(query_vector, query_tokens, skill, text)
+        pool = [
+            skill for skill in skills
+            if not (active_only and skill.status != "active")
+        ]
+        texts = [
+            skill.embedding_text or f"{skill.name}\n{skill.description}\n{skill.content[:1000]}"
+            for skill in pool
+        ]
+        relevances = vector_relevances(
+            [
+                similarity.cosine(query_vector, skill.embedding_vector)
+                if query_vector and skill.embedding_vector
+                else None
+                for skill in pool
+            ],
+            self.min_vector_score,
+        )
+
+        for skill, text, vector_relevance in zip(pool, texts, relevances):
+            score = self._score(vector_relevance, query_tokens, text)
             if score <= 0 or score < min_score:
                 continue
             candidates.append(RetrievedSkill(skill=skill, score=score))
@@ -133,20 +186,12 @@ class SkillRetriever:
 
     def _score(
         self,
-        query_vector: Optional[List[float]],
+        vector_relevance: float,
         query_tokens: set[str],
-        skill: Skill,
         skill_text: str,
     ) -> float:
-        vector_score = 0.0
-        if query_vector and skill.embedding_vector:
-            vector_score = similarity.cosine(query_vector, skill.embedding_vector)
-            if vector_score < self.min_vector_score:
-                vector_score = 0.0
         lexical_score = similarity.jaccard(query_tokens, self._tokens(skill_text))
-        if vector_score and lexical_score < LEXICAL_EVIDENCE_SCORE and vector_score < VECTOR_EVIDENCE_SCORE:
-            vector_score = 0.0
-        return max(vector_score, lexical_score)
+        return max(vector_relevance, lexical_score)
 
     @staticmethod
     def _tokens(text: str) -> set[str]:
@@ -196,7 +241,7 @@ class MemoryRetriever:
         self,
         embedding_client=None,
         embedding_model: Optional[str] = None,
-        min_vector_score: float = 0.55,
+        min_vector_score: float = ABSOLUTE_VECTOR_FLOOR,
     ):
         self.embedding_client = embedding_client
         self.embedding_model = embedding_model
@@ -216,13 +261,29 @@ class MemoryRetriever:
             query_vector = self._embed_query(task_text)
         candidates: List[RetrievedMemory] = []
 
-        for memory in memories:
-            if active_only and (
-                not memory.get("is_active", True) or memory.get("is_archived", False)
-            ):
-                continue
+        pool = [
+            memory for memory in memories
+            if not (
+                active_only
+                and (
+                    not memory.get("is_active", True)
+                    or memory.get("is_archived", False)
+                )
+            )
+        ]
+        relevances = vector_relevances(
+            [
+                similarity.cosine(query_vector, memory.get("embedding") or [])
+                if query_vector and memory.get("embedding")
+                else None
+                for memory in pool
+            ],
+            self.min_vector_score,
+        )
+
+        for memory, vector_relevance in zip(pool, relevances):
             text = self._memory_text(memory)
-            score = self._score(query_tokens, query_vector, memory, text)
+            score = self._score(query_tokens, vector_relevance, text)
             if score <= 0 or score < min_score:
                 continue
             candidates.append(RetrievedMemory(memory=memory, score=score))
@@ -281,22 +342,13 @@ class MemoryRetriever:
     def _score(
         self,
         query_tokens: set[str],
-        query_vector: Optional[List[float]],
-        memory: dict,
+        vector_relevance: float,
         memory_text: str,
     ) -> float:
         lexical = similarity.jaccard(query_tokens, SkillRetriever._tokens(memory_text))
         exact = self._exact_boost(query_tokens, memory_text)
-        vector = 0.0
-        memory_vector = memory.get("embedding") or []
-        if query_vector and memory_vector:
-            vector = similarity.cosine(query_vector, memory_vector)
-            if vector < self.min_vector_score:
-                vector = 0.0
-        if vector and lexical < LEXICAL_EVIDENCE_SCORE and vector < VECTOR_EVIDENCE_SCORE:
-            vector = 0.0
         lexical_score = min(1.0, lexical + exact)
-        base = max(lexical_score, vector)
+        base = max(lexical_score, vector_relevance)
         if query_tokens and base <= 0:
             return 0.0
         return base

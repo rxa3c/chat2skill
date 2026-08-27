@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import io
+import math
 import os
 import sqlite3
 import sys
@@ -13,6 +14,11 @@ from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "scripts"))
+
+
+def _unit_vector(cosine: float) -> list[float]:
+    """Return a unit vector whose cosine against [1.0, 0.0] is exactly `cosine`."""
+    return [cosine, math.sqrt(1.0 - cosine * cosine)]
 
 from chat2skill import memory_client, runner
 from chat2skill.context_store import apply_memory_result, load_context, save_context
@@ -272,19 +278,68 @@ class MemoryClientTests(unittest.TestCase):
 
         self.assertEqual(retrieved[0].memory["id"], "right-semantic")
 
-    def test_memory_retriever_rejects_high_baseline_vector_without_text_evidence(self):
+    def test_memory_retriever_rejects_baseline_vectors_within_population(self):
+        """Baseline similarity is defined by the query's own distribution.
+
+        Every baseline memory here sits above the absolute fallback floor, so an
+        absolute cut would admit all of them. Relative scoring keeps only the
+        candidate that stands out against this query's own mean.
+        """
+
         class FakeEmbedder:
-            def embed(self, text, model=None):
+            def embed_query(self, text, model=None):
                 return [1.0, 0.0]
 
         memories = [
             {
-                "id": "baseline-only",
+                "id": f"baseline-{index}",
+                "content": f"Unrelated deployment administration detail {index}.",
+                "memory_type": "fact",
+                "section": "project",
+                "embedding": _unit_vector(0.60 + 0.003 * index),
+            }
+            for index in range(30)
+        ]
+        memories.append(
+            {
+                "id": "on-topic",
+                "content": "Session markdown records confirmed bug decisions.",
+                "memory_type": "decision",
+                "section": "project",
+                "embedding": _unit_vector(0.95),
+            }
+        )
+
+        retrieved = MemoryRetriever(embedding_client=FakeEmbedder()).retrieve(
+            "session markdown confirmed bug decisions",
+            memories,
+            top_k=12,
+        )
+
+        self.assertEqual([item.memory["id"] for item in retrieved], ["on-topic"])
+
+    def test_memory_retriever_falls_back_to_absolute_floor_for_small_population(self):
+        """Too few candidates to rank relatively; the absolute floor decides."""
+
+        class FakeEmbedder:
+            def embed_query(self, text, model=None):
+                return [1.0, 0.0]
+
+        memories = [
+            {
+                "id": "above-floor",
                 "content": "Unrelated deployment administration detail.",
                 "memory_type": "fact",
                 "section": "project",
-                "embedding": [0.66, 0.751265],
-            }
+                "embedding": _unit_vector(0.66),
+            },
+            {
+                "id": "below-floor",
+                "content": "Another unrelated administration note.",
+                "memory_type": "fact",
+                "section": "project",
+                "embedding": _unit_vector(0.40),
+            },
         ]
 
         retrieved = MemoryRetriever(embedding_client=FakeEmbedder()).retrieve(
@@ -292,7 +347,7 @@ class MemoryClientTests(unittest.TestCase):
             memories,
         )
 
-        self.assertEqual(retrieved, [])
+        self.assertEqual([item.memory["id"] for item in retrieved], ["above-floor"])
 
     def test_context_memories_get_local_embeddings(self):
         class FakeEmbedder:

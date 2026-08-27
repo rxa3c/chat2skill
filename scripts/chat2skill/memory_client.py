@@ -869,7 +869,13 @@ def _prepend_recall_synthesis(result: dict[str, Any], synthesis: dict[str, Any])
         "token_count": synthesis.get("token_count"),
     }
 
+    prompt_contexts = dict(merged.get("prompt_contexts") or {})
+    recall_context = str(prompt_contexts.get("recall") or "").strip()
+    prompt_contexts["recall"] = section + ("\n\n" + recall_context if recall_context else "")
+    merged["prompt_contexts"] = prompt_contexts
+
     memory = dict(merged.get("memory") or {})
+    memory["rendered_text"] = prompt_contexts["recall"]
     existing_memory_ids = list(memory.get("memories_included") or [])
     for memory_id in synthesis.get("memories_included") or []:
         if memory_id not in existing_memory_ids:
@@ -917,9 +923,7 @@ def _build_local_materialization(
         memory_parts.append("## Similar Prior Tasks\n" + _cap_text(worked_examples_text, memory_budget // 4))
 
     memory_rendered = _cap_text("\n\n".join(memory_parts), memory_budget)
-    prompt_parts = []
-    if memory_rendered:
-        prompt_parts.append(memory_rendered)
+    instruction_parts = []
     project_skill_included = False
     project_skill_rendered = ""
     retrieved_skills_included = False
@@ -928,7 +932,7 @@ def _build_local_materialization(
             project_skill_text,
             min(PROJECT_SKILL_TOKEN_BUDGET, skill_budget),
         )
-        prompt_parts.append(project_skill_rendered)
+        instruction_parts.append(project_skill_rendered)
         project_skill_included = True
     if skills_text:
         remaining_skill_budget = max(
@@ -936,11 +940,13 @@ def _build_local_materialization(
             skill_budget - _estimate_tokens(project_skill_rendered),
         )
         if remaining_skill_budget:
-            prompt_parts.append(
+            instruction_parts.append(
                 "## Relevant Project Skills\n" + _cap_text(skills_text, remaining_skill_budget)
             )
             retrieved_skills_included = True
 
+    instructions_rendered = _cap_text("\n\n".join(instruction_parts), skill_budget)
+    prompt_parts = [part for part in (memory_rendered, instructions_rendered) if part.strip()]
     rendered = "\n\n".join(part for part in prompt_parts if part.strip())
     rendered = _cap_text(rendered, token_budget)
     materialization_id = str(uuid.uuid4())
@@ -949,6 +955,10 @@ def _build_local_materialization(
         "rendered_text": rendered,
         "token_count": _estimate_tokens(rendered),
         "materialization_id": materialization_id,
+        "prompt_contexts": {
+            "recall": memory_rendered,
+            "instructions": instructions_rendered,
+        },
         "memory": {
             "rendered_text": memory_rendered,
             "memories_included": [
@@ -968,7 +978,7 @@ def _build_local_materialization(
         "skills": {
             "skills_included": (["project-skill"] if project_skill_included else [])
             + ([item.skill.name for item in retrieved_skills] if retrieved_skills_included else []),
-            "token_count": _estimate_tokens("\n\n".join(prompt_parts[1:] if memory_rendered else prompt_parts)),
+            "token_count": _estimate_tokens(instructions_rendered),
         },
     }
 

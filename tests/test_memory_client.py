@@ -380,6 +380,9 @@ class MemoryClientTests(unittest.TestCase):
 
             self.assertIn("Project deploys on EC2.", result["rendered_text"])
             self.assertIn("ec2-deploy-check", result["rendered_text"])
+            self.assertIn("Project deploys on EC2.", result["prompt_contexts"]["recall"])
+            self.assertIn("ec2-deploy-check", result["prompt_contexts"]["instructions"])
+            self.assertNotIn("Project deploys on EC2.", result["prompt_contexts"]["instructions"])
             self.assertEqual(context["last_materialization"]["materialization_id"], result["materialization_id"])
             self.assertEqual(context["last_materialization"]["memories_included"], ["b1"])
             self.assertEqual(context["last_materialization"]["skills_included"], ["ec2-deploy-check"])
@@ -447,6 +450,8 @@ class MemoryClientTests(unittest.TestCase):
             cloud_recall.assert_called_once()
             self.assertIn("Chat2Skill Recall Summary", result["rendered_text"])
             self.assertIn("PendingAction 是独立子系统", result["rendered_text"])
+            self.assertIn("PendingAction 是独立子系统", result["prompt_contexts"]["recall"])
+            self.assertNotIn("PendingAction 是独立子系统", result["prompt_contexts"]["instructions"])
             self.assertEqual(result["recall_synthesis"]["memories_included"], ["m1"])
 
     def test_materialize_filters_unrelated_core_and_injects_project_skill(self):
@@ -483,6 +488,9 @@ class MemoryClientTests(unittest.TestCase):
 
             self.assertIn("## Project Skill", result["rendered_text"])
             self.assertIn("Always keep bug fixes focused", result["rendered_text"])
+            self.assertIn("## Project Skill", result["prompt_contexts"]["instructions"])
+            self.assertIn("Always keep bug fixes focused", result["prompt_contexts"]["instructions"])
+            self.assertNotIn("Always keep bug fixes focused", result["prompt_contexts"]["recall"])
             self.assertNotIn("DeepSeek Harness package deployment", result["rendered_text"])
             self.assertEqual(result["skills"]["skills_included"], ["project-skill"])
 

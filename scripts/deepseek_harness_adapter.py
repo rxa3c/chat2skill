@@ -23,7 +23,7 @@ from chat2skill import runner
 from chat2skill.config import DATA_HOME, load_config
 from chat2skill.hookio import project_user_id
 from chat2skill.initializer import ensure_user_home
-from chat2skill.integration import retrieve_prompt_context
+from chat2skill.integration import prompt_contexts_for_result, retrieve_prompt_context
 from chat2skill.response_guard import evaluate_stop_payload, reset_guard_state
 
 
@@ -70,8 +70,11 @@ def retrieve(payload: dict[str, Any], config: dict) -> dict[str, Any]:
         scoped_user_id,
         prompt,
     )
+    contexts = prompt_contexts_for_result(result)
     return {
         "context": context,
+        "recall_context": contexts["recall"],
+        "instructions_context": contexts["instructions"],
         "materialization_id": result.get("materialization_id"),
     }
 

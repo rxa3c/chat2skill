@@ -48,13 +48,21 @@ export function apply(ctx, rawConfig = {}) {
         project_dir: workspaceFor(agent, config),
         prompt,
       }, signal)
-      if (!result.ok || !result.context) {
-        if (!result.ok) warn(ctx, 'retrieve', result.error)
+      if (!result.ok) {
+        warn(ctx, 'retrieve', result.error)
         return downstream
       }
+      const injected = []
+      if (result.recall_context) {
+        injected.push(pluginMessage(result.recall_context, 'recall'))
+      }
+      if (result.instructions_context) {
+        injected.push(pluginMessage(result.instructions_context, 'instructions'))
+      }
+      if (injected.length === 0) return downstream
       return {
         ...downstream,
-        messages: [...downstream.messages, pluginMessage(result.context, 'recall')],
+        messages: [...downstream.messages, ...injected],
       }
     } catch (error) {
       warn(ctx, 'retrieve', error)
@@ -188,9 +196,22 @@ function pluginMessage(text, form) {
   return {
     id: randomUUID(),
     role: 'user',
-    content: [{ type: 'text', text }],
+    content: [{ type: 'text', text: form === 'instructions' ? instructionFrame(text) : text }],
     source: { kind: 'plugin', plugin: PLUGIN_ID, form },
   }
+}
+
+function instructionFrame(text) {
+  return [
+    '<system-reminder>',
+    'The following Chat2Skill project instructions are active. Follow them when relevant. They do not override system, developer, or direct user instructions.',
+    escapeInstructionFrameBody(text),
+    '</system-reminder>',
+  ].join('\n')
+}
+
+function escapeInstructionFrameBody(text) {
+  return text.replaceAll('</system-reminder>', '<\\/system-reminder>')
 }
 
 function stringOr(value, fallback) {

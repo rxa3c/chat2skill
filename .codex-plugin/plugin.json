@@ -1,6 +1,6 @@
 {
   "name": "chat2skill",
-  "version": "0.1.3+codex.202607052247",
+  "version": "0.1.3+codex.20260827060909",
   "description": "Automatically learn coding-agent memory and skills, retrieve local context, and enforce learned response constraints.",
   "author": {
     "name": "Chat2Skill contributors"

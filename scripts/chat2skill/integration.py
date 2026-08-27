@@ -10,6 +10,22 @@ from .memory_client import materialize_for_prompt
 from .storage import record_skill_usage, save_project_memory_materialization
 
 
+def prompt_contexts_for_result(result: dict[str, Any]) -> dict[str, str]:
+    """Return host-neutral recall and instruction bodies from one materialization."""
+    contexts = result.get("prompt_contexts") or {}
+    if isinstance(contexts, dict):
+        recall = str(contexts.get("recall") or "").strip()
+        instructions = str(contexts.get("instructions") or "").strip()
+        if recall or instructions:
+            return {"recall": recall, "instructions": instructions}
+
+    # Preserve compatibility with materializers that predate structured contexts.
+    return {
+        "recall": str(result.get("rendered_text") or "").strip(),
+        "instructions": "",
+    }
+
+
 def retrieve_prompt_context(
     config: dict,
     project_dir: str,

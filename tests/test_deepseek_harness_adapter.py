@@ -13,6 +13,30 @@ import deepseek_harness_adapter
 
 
 class DeepSeekHarnessAdapterTests(unittest.TestCase):
+    def test_normalize_messages_rejects_non_list_inputs(self):
+        for value in (None, "not a list", {"role": "user", "content": "hello"}, ()): 
+            with self.subTest(value=value):
+                self.assertEqual(deepseek_harness_adapter.normalize_messages(value), [])
+
+    def test_normalize_messages_keeps_valid_unicode_messages_and_filters_invalid_items(self):
+        value = [
+            {"role": "user", "content": "こんにちは 🌍"},
+            {"role": "assistant", "content": "Привет"},
+            {"role": "user", "content": ""},
+            {"role": "", "content": "missing role"},
+            {"role": "system", "content": "unsupported role"},
+            {"role": "user"},
+            "not a message",
+        ]
+
+        self.assertEqual(
+            deepseek_harness_adapter.normalize_messages(value),
+            [
+                {"role": "user", "content": "こんにちは 🌍"},
+                {"role": "assistant", "content": "Привет"},
+            ],
+        )
+
     def test_retrieve_exposes_recall_and_instructions_separately(self):
         materialization = {
             "materialization_id": "mat-1",
